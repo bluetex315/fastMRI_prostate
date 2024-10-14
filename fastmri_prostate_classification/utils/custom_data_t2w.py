@@ -1,9 +1,14 @@
 # import modules
 import os
 import numpy as np
-import torch
-import torch.utils.data as data
 import pandas as pd
+import torch
+import torch.nn.functional as F
+import torch.utils.data as data
+from torch.autograd import Variable
+import random
+import matplotlib.pyplot as plt
+import shutil
 from sklearn.model_selection import train_test_split
 from monai.transforms import (
     Compose, LoadImageD, EnsureChannelFirst, RandFlip, RandRotate, ScaleIntensityRange, CenterSpatialCrop, NormalizeIntensity
@@ -91,13 +96,25 @@ class FastMRIDataset(data.Dataset):
         print(self.data_df.head())
         print(f"Number of slices in {split} set: {len(self.data_df)}")
 
+        self.labels = np.asarray(self.data_df['label'].values)                       
+        neg_weight = np.mean(self.labels)                          
+        self.weights = [neg_weight, 1 - neg_weight]                
+        
+        print("Weights for binary CE:{}".format(self.weights))     
+        
         # Define MONAI transforms
         if split == 'train':  
             self.transforms = Compose([
                 EnsureChannelFirst(),
-                RandFlip(prob=0.5, spatial_axis=1),
-                RandRotate(range_x=np.pi / 15, prob=0.5),
-                ScaleIntensityRange(a_min=-500, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
+                RandFlip(prob=0.25, spatial_axis=1),
+                RandRotate(range_x=12,   # Degrees of rotation for the x-axis (between -12 and 12)
+                    range_y=0.0,  # No rotation for the y-axis
+                    range_z=0.0,  # No rotation for the z-axis
+                    prob=0.25,     # Ensure that the rotation is always applied
+                    keep_size=True, # Keep the same image size after rotation (reshape=False equivalent)
+                    padding_mode="zeros"
+                ),
+                # ScaleIntensityRange(a_min=-500, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
                 CenterSpatialCrop(roi_size=(224, 224)),
                 NormalizeIntensity()
             ])
@@ -105,10 +122,28 @@ class FastMRIDataset(data.Dataset):
         else:
             self.transforms = Compose([
                 EnsureChannelFirst(),
-                ScaleIntensityRange(a_min=-500, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
+                # ScaleIntensityRange(a_min=-500, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
                 CenterSpatialCrop(roi_size=(224, 224)),
                 NormalizeIntensity()
             ])
+
+
+    #  https://doi.org/10.1371/journal.pmed.1002699.s001 
+    def weighted_loss(self, prediction, target):
+        """
+        Compute the weighted cross-entropy loss.
+
+        Parameters:
+        - prediction (Tensor): Model predictions.
+        - target (Tensor): Ground truth labels.
+
+        Returns:
+        - loss (Tensor): Weighted cross-entropy loss.
+        """
+        weights_npy = np.array([self.weights[int(t)] for t in target.data])    
+        weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
+        loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
+        return loss
 
 
     def __getitem__(self, index):
@@ -127,8 +162,8 @@ class FastMRIDataset(data.Dataset):
     def __len__(self):
         return len(self.data_df)
 
-
-def load_data(datapath, labelpath, norm_type, augment):
+ 
+def load_data(datapath, labelpath, norm_type, augment, saveims, rundir):
     """
     Load FastMRI prostate data and create DataLoader instances for training, validation, and testing.
 
@@ -149,9 +184,9 @@ def load_data(datapath, labelpath, norm_type, augment):
     test_dataset = FastMRIDataset(datapath, labelpath, norm_type, augment=False, split='test')
 
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=4, num_workers=4, shuffle=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=4, num_workers=4, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=4, num_workers=4, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=32, num_workers=4, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=32, num_workers=4, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=32, num_workers=4, shuffle=False)
 
     return train_loader, valid_loader, test_loader
 

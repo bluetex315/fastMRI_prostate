@@ -3,7 +3,8 @@ import numpy as np
 import os
 import torch
 from sklearn import metrics
-from utils.load_fastmri_data_convnext_t2 import load_data
+# from utils.load_fastmri_data_convnext_t2 import load_data
+from utils.custom_data_t2w import load_data
 from model.model import ConvNext_model
 from utils.pytorchtools import EarlyStopping
 from model.extra_model_utils import get_optim_sched, get_lr
@@ -11,6 +12,7 @@ from shutil import copyfile
 from torch.utils.tensorboard import SummaryWriter
 import yaml
 import pickle
+from tqdm import tqdm
 
 def train(model, optimizer, scheduler, train_loader, device):
     """
@@ -33,7 +35,10 @@ def train(model, optimizer, scheduler, train_loader, device):
     """
 
     total_loss_train, total_num, all_out, all_labels = 0.0, 0,  [], []  
-    for _, (data, target) in enumerate(train_loader):
+
+    train_loader_tqdm = tqdm(train_loader, desc="Training", unit="batch")
+
+    for _, (data, target) in enumerate(train_loader_tqdm):
         data, target = data.to(device), torch.flatten(target.to(device))  
         optimizer.zero_grad()                                            
         out = model(data)                                                
@@ -50,14 +55,22 @@ def train(model, optimizer, scheduler, train_loader, device):
 
     all_labels_npy = torch.cat(all_labels).detach().cpu().numpy().astype(np.int32)   
     all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()         
+    # Convert raw predictions to binary predictions
+    binary_preds_npy = (all_preds_npy > 0.5).astype(int)
 
     auc = metrics.roc_auc_score(all_labels_npy, all_preds_npy)                      
     
+    accuracy = metrics.accuracy_score(all_labels_npy, binary_preds_npy)
+    recall = metrics.recall_score(all_labels_npy, binary_preds_npy)
+    f1 = metrics.f1_score(all_labels_npy, binary_preds_npy)
+
+    conf_matrix = metrics.confusion_matrix(all_labels_npy, binary_preds_npy)
+
     current_loss = total_loss_train/total_num                           
     current_lr = get_lr(optimizer)                                        
     scheduler.step()                                                      
 
-    return auc, current_lr, current_loss, torch.cat(all_labels), torch.cat(all_out)
+    return auc, current_lr, current_loss, accuracy, recall, f1, conf_matrix, torch.cat(all_labels), torch.cat(all_out)
 
 def val(model, val_loader, device):
     """
@@ -76,9 +89,12 @@ def val(model, val_loader, device):
     - raw_preds_validation (Tensor): Concatenated raw predictions from the validation set.
     """
     total_loss_val, total_num_val, all_out, all_labels_val = 0.0, 0,  [], []  
-    model.eval()                                                             
+    model.eval()   
+
+    val_loader_tqdm = tqdm(val_loader, desc="Validating", unit="batch")
+
     with torch.no_grad():                                                    
-        for _, (data, target) in enumerate(val_loader):
+        for _, (data, target) in enumerate(val_loader_tqdm):
             data, target = data.to(device), torch.flatten(target.to(device))  
             out = model(data)                                                
 
@@ -92,11 +108,19 @@ def val(model, val_loader, device):
 
     all_labels_npy = torch.cat(all_labels_val).detach().cpu().numpy().astype(np.int32) 
     all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()           
+    binary_preds_npy = (all_preds_npy > 0.5).astype(int)
 
-    auc_val = metrics.roc_auc_score(all_labels_npy, all_preds_npy)                     
+    auc_val = metrics.roc_auc_score(all_labels_npy, all_preds_npy)  
+
+    accuracy = metrics.accuracy_score(all_labels_npy, binary_preds_npy)
+    recall = metrics.recall_score(all_labels_npy, binary_preds_npy)
+    f1 = metrics.f1_score(all_labels_npy, binary_preds_npy)
+    
+    conf_matrix = metrics.confusion_matrix(all_labels_npy, binary_preds_npy)
+
     current_loss = total_loss_val/total_num_val                                         
         
-    return auc_val, current_loss, torch.cat(all_labels_val), torch.cat(all_out)
+    return auc_val, current_loss, accuracy, recall, f1, conf_matrix, torch.cat(all_labels_val), torch.cat(all_out)
 
 
 def train_network(config):
@@ -111,7 +135,7 @@ def train_network(config):
     device = torch.device("cuda" if use_cuda else "cpu")                
     print('Found this device:{}'.format(device))
     
-    train_loader, valid_loader, test_loader = load_data(config['data']['datasheet'], config["data"]["data_location"], int(config['data']['norm_type']),  config['training']['augment'], config['training']['saveims'], config['model_args']['rundir'])
+    train_loader, valid_loader, test_loader = load_data(config['data']['datapath'], config["data"]["labelpath"], int(config['data']['norm_type']),  config['training']['augment'], config['training']['saveims'], config['model_args']['rundir'])
     print('Lengths: Train:{}, Val:{}, Test:{}'.format(len(train_loader), len(valid_loader), len(test_loader)))  
     
     model = ConvNext_model(config)
@@ -125,8 +149,8 @@ def train_network(config):
     saver = dict()                                      
     for e in range(config['training']['max_epochs']):  
         model.train()                                 
-        AUC_train, current_LR, current_loss_train, labels_train, raw_preds_train  = train(model, optimizer, scheduler, train_loader, device)       
-        AUC_val, current_loss_val, labels_validation, raw_preds_validation  = val(model, valid_loader, device)     
+        AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, device)       
+        AUC_val, current_loss_val, acc_val, recall_val, f1_val, conf_matrix_val, labels_validation, raw_preds_validation  = val(model, valid_loader, device)     
 
         early_stopping(current_loss_val, model)       
         
@@ -147,8 +171,20 @@ def train_network(config):
         writer.add_scalar("AUC/Validation", AUC_val, e)            
         writer.add_scalar("Learning Rate", current_LR, e)          
         
-        print('Current epoch: {}, Train_loss:{:.3f}, Validation_loss:{:.3f}, Train_AUC:{:.3f}, Validation_AUC:{:.3f}, LR:{}'.format(e, current_loss_train, current_loss_val, AUC_train, AUC_val,current_LR))
-        
+        print('Current epoch: {}, '
+            'Train_loss: {:.3f}, '
+            'Val_loss: {:.3f}, \n'
+            'Train_ACC: {:.3f}, '
+            'Val_ACC: {:.3f}, '
+            'Train_AUC: {:.3f}, '
+            'Val_AUC: {:.3f}, '
+            'Train_Recall: {:.3f}, '
+            'Val_Recall: {:.3f}, '
+            'LR: {}'.format(e, current_loss_train, current_loss_val, acc_train, acc_val, AUC_train, AUC_val, recall_train, recall_val, current_LR))
+
+        print(f"Confusion Matrix (Train):\n{conf_matrix_train}")
+        print(f"Confusion Matrix (Val):\n{conf_matrix_val}")
+
         saver[e] = dict()
         saver[e]['val_preds'] = raw_preds_validation
         saver[e]['val_labels'] = labels_validation

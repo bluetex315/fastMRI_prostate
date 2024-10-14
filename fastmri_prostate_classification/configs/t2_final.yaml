@@ -14,9 +14,10 @@ model_args:
       weight_decay: 0.0001                  # 1e-04
       amsgrad: True                         # True to use amsgrad https://www.fast.ai/posts/2018-07-02-adam-weight-decay.html https://openreview.net/forum?id=ryQu7f-RZ
 data:
-      datasheet: "../fastmri_prostate/data/t2_slice_level_labels.csv" 
-      norm_type: 2                         # 1 = percentile clip, 2 = standardisation, 3 = min-max-scaling, 4 = Gaussian norm 
-      data_location: "/path/to/fastmri_prostate_data/"
+      datapath: "/home/lc2382/project/fastMRI_NYU/nifti"
+      labelpath: "/home/lc2382/project/fastMRI_NYU/labels/pirads_t2w_npz"
+      norm_type: 2                     # 1 = percentile clip, 2 = standardisation, 3 = min-max-scaling, 4 = Gaussian norm 
+      
 training:
       augment: False                       # True if augmenatation = on see utils/augmentation_3d.py for details
       saveims: False                       # Recommend True to check on status of training images especially if augment
