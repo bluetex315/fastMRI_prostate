@@ -77,7 +77,7 @@ class FastMRIDataset(data.Dataset):
         
         for _, row in split_df.iterrows():
             temp_dict = {'image': row['image']}
-            image_loader = LoadImageD(keys=['image'], image_only=True)
+            image_loader = LoadImageD(keys=['image'], image_only=True, reader='NibabelReader')
             image_data = image_loader(temp_dict)['image']
             # print(row['label'])
             label_data = np.load(row['label'])['pirads']

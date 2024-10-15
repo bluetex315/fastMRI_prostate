@@ -9,13 +9,13 @@ model_args:
       lr_decay_steps: [2,4,7,10]            # what epoch nums do we want to reduce LR at [10, 20, 40] etc
       scheduler_plat_loss: True             # True if you want to reduce LR when gains on validation plateau
       scheduler_plat_auc: False             # True if you want to reduce LR when gains on validation plateau
-      lr: 0.0001                            # typically 1e-03
+      lr: 0.00001                           # typically 1e-03
       momentum: 0.99                        # typically 1e-02
-      weight_decay: 0.0001                  # 1e-04
+      weight_decay: 0.001                   # 1e-04
       amsgrad: True                         # True to use amsgrad https://www.fast.ai/posts/2018-07-02-adam-weight-decay.html https://openreview.net/forum?id=ryQu7f-RZ
 data:
-      datapath: "/home/lc2382/project/fastMRI_NYU/nifti"
-      labelpath: "/home/lc2382/project/fastMRI_NYU/labels/pirads_t2w_npz"
+      datapath: "/data2/joanna/FastMRI_Dataset/FastMRI_Dataset/nifti"
+      labelpath: "/data2/lc2382/fastMRI_prostate_NYU/FastMRI_Dataset/labels_npz/pirads_t2w_npz"
       norm_type: 2                     # 1 = percentile clip, 2 = standardisation, 3 = min-max-scaling, 4 = Gaussian norm 
       
 training:
