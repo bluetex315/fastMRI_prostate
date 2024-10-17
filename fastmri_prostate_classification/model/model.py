@@ -22,11 +22,11 @@ def ConvNext_model(args, diff=False):
     """
     if args['model_args']['model'] == "convnext":
         weights_cn = ConvNeXt_Base_Weights.DEFAULT                                  
-        model = convnext_base(weights=weights_cn)                                  
-        model.features[0][0] = nn.Conv2d(1, 128, kernel_size=(4, 4), stride=(4, 4))   
+        model = convnext_base(weights=weights_cn)  
 
-        if args['concat_mask']:
-            model.features[0][0] = nn.Conv2d(2, 128, kernel_size=(4, 4), stride=(4, 4))  
+        input_channels = 1 + int(args['concat_mask']) + int(args['concat_adc'])
+
+        model.features[0][0] = nn.Conv2d(input_channels, 128, kernel_size=(4, 4), stride=(4, 4))   
 
         if diff:
             model.features[0][0] = nn.Conv2d(2, 128, kernel_size=(4, 4), stride=(4, 4))  
