@@ -38,8 +38,13 @@ def train(model, optimizer, scheduler, train_loader, device):
 
     train_loader_tqdm = tqdm(train_loader, desc="Training", unit="batch")
 
-    for _, (data, target) in enumerate(train_loader_tqdm):
-        data, target = data.to(device), torch.flatten(target.to(device))  
+    for _, (t2w, gland_mask, target) in enumerate(train_loader_tqdm):
+        t2w = t2w.to(device)
+        gland_mask = gland_mask.to(device)
+        target = torch.flatten(target.to(device))  
+
+        data = torch.cat([t2w, gland_mask], dim=0).to(device)
+
         optimizer.zero_grad()                                            
         out = model(data)                                                
 

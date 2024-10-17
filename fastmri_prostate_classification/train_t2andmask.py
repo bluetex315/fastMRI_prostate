@@ -38,8 +38,13 @@ def train(model, optimizer, scheduler, train_loader, device):
 
     train_loader_tqdm = tqdm(train_loader, desc="Training", unit="batch")
 
-    for _, (data, target) in enumerate(train_loader_tqdm):
-        data, target = data.to(device), torch.flatten(target.to(device))  
+    for _, (t2w, gland_mask, target) in enumerate(train_loader_tqdm):
+        t2w = t2w.to(device)
+        gland_mask = gland_mask.to(device)
+        data = torch.cat([t2w, gland_mask], dim=1)
+
+        target = torch.flatten(target.to(device)) 
+
         optimizer.zero_grad()                                            
         out = model(data)                                                
 
@@ -91,13 +96,16 @@ def val(model, val_loader, device):
     total_loss_val, total_num_val, all_out, all_labels_val = 0.0, 0,  [], []  
     model.eval()   
 
-    val_loader_tqdm = tqdm(val_loader, desc="Validating", unit="batch")
-
+    val_loader_tqdm = tqdm(val_loader, desc="Validating", unit="batch")  
+        
     with torch.no_grad():                                                    
-        for _, (data, target) in enumerate(val_loader_tqdm):
-            data, target = data.to(device), torch.flatten(target.to(device))  
+        for _, (t2w, gland_mask, target) in enumerate(val_loader_tqdm):
+            t2w = t2w.to(device)
+            gland_mask = gland_mask.to(device)
+            data = torch.cat([t2w, gland_mask], dim=1)
+            print(data.shape)
+            target = torch.flatten(target.to(device)) 
             out = model(data)                                                
-
             out = torch.flatten(out)                                          
             loss = val_loader.dataset.weighted_loss(out, target)              
             
@@ -224,6 +232,7 @@ def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_file', type=str, required=True)           # config file which has all the training inputs
     parser.add_argument('--index_seed', type=int, required=True)            # Seed number for reproducibility for all numpy, random, torch
+    parser.add_argument('--concat_mask', type=bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     return parser
 
 
@@ -232,12 +241,13 @@ if __name__ == '__main__':
     Main script for training the ConvNext model.
     """
     args_con = get_parser().parse_args() 
-
     seed_list = [10383, 44820, 238, 3939, 74783, 92938, 143, 2992, 7373, 988]           
     seed_select =  seed_list[args_con.index_seed]                                      
     
     with open(args_con.config_file) as f:
         args = yaml.load(f, Loader=yaml.UnsafeLoader) 
+
+    args['concat_mask'] = args_con.concat_mask
 
     main_fol = args["results_fol"]
     args['model_args']['rundir'] = os.path.join(main_fol, args['model_args']['rundir'] + '_SEED_' + str(seed_select)) 
@@ -253,6 +263,7 @@ if __name__ == '__main__':
     torch.backends.cudnn.benchmark = False
     np.random.seed(seed_select)
 
+    print(args)
     train_network(args)
 
 # %%

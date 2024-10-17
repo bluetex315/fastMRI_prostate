@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import shutil
 from sklearn.model_selection import train_test_split
 from monai.transforms import (
-    Compose, LoadImageD, EnsureChannelFirst, RandAffine, RandFlip, RandRotate, ScaleIntensityRange, CenterSpatialCrop, NormalizeIntensity
+    Compose, LoadImageD, LoadImage, EnsureChannelFirst, RandAffine, RandFlip, RandRotate, ScaleIntensityRange, CenterSpatialCrop, NormalizeIntensity
 )
 from monai.data import Dataset, DataLoader
 
@@ -87,27 +87,29 @@ class FastMRIDataset(data.Dataset):
 
             t2w_data = data['t2w']
             gland_mask_data = data['gland_mask']
-            # print(t2w_data, t2w_data.shape)
-            # print(gland_mask_data, gland_mask_data.shape)
+            # print(t2w_data.shape, gland_mask_data.shape)
+            if t2w_data.shape != gland_mask_data.shape:
+                print("problematic gland mask shape not align", temp_dict)
+                continue
             z_slices_sum = np.sum(gland_mask_data, axis=(0,1))
             z_indices = np.where(np.any(gland_mask_data, axis=(0, 1)))[0]
-            print(z_indices)
-            print(z_slices_sum)
+
             # Calculate start and end slice indices with margins
             try:
                 # Try accessing z_indices assuming it's not empty
-                start_idx = max(z_indices[0] - 5, 0)
-                end_idx = min(z_indices[-1] + 5, gland_mask_data.shape[2] - 1)
+                # start_idx = max(z_indices[0] - 5, 0)
+                # end_idx = min(z_indices[-1] + 5, gland_mask_data.shape[2] - 1)
 
-                # start_idx = 0
-                # end_idx = t2w_data.shape[2] - 1
+                start_idx = 0
+                end_idx = t2w_data.shape[2] - 1
 
             except (IndexError, TypeError) as e:
                 # Handle cases where z_indices is empty or not iterable
                 print(f"An error occurred: {e}")
                 print("else case triggered", temp_dict)
-                start_idx = 0
-                end_idx = t2w_data.shape[2] - 1
+                # start_idx = 0
+                # end_idx = t2w_data.shape[2] - 1
+                continue
 
             label_data = np.load(row['label'])['pirads']
             count1 = sum(1 for x in label_data if x != 1 and x != 2)
@@ -117,12 +119,11 @@ class FastMRIDataset(data.Dataset):
                 print(temp_dict)
                 print(label_data)
                 print(label_data[start_idx:end_idx+1])
-            print(count1, count2)
-            print()
 
             for slice_idx in range(start_idx, end_idx + 1):
                 expanded_data_list.append({
-                    "image": t2w_data[:, :, slice_idx],
+                    "t2w": t2w_data[:, :, slice_idx],
+                    "gland_mask": gland_mask_data[:, :, slice_idx],
                     "label": (label_data[slice_idx] > 2).astype(np.int32),
                     "patient_id": row['patient_id'],
                     "slice_idx": slice_idx
@@ -135,37 +136,58 @@ class FastMRIDataset(data.Dataset):
 
         self.labels = np.asarray(self.data_df['label'].values)                       
         neg_weight = np.mean(self.labels)                          
-        self.weights = [neg_weight, 1 - neg_weight]                
+        self.weights = [neg_weight*2, 1 - neg_weight*2]                
         
         print("Weights for binary CE:{}".format(self.weights))     
         
         # Define MONAI transforms
         if split == 'train':  
-            self.transforms = Compose([
+            self.t2w_transforms = Compose([
                 EnsureChannelFirst(),
                 RandAffine(
                     prob=0.5,
-                    translate_range=(0,16,16)
+                    translate_range=(0, 16, 16)
                 ),
                 RandFlip(prob=0.5, spatial_axis=1),
-                RandRotate(range_x=12,   # Degrees of rotation for the x-axis (between -12 and 12)
+                RandRotate(
+                    range_x=12,   # Degrees of rotation for the x-axis (between -12 and 12)
                     range_y=0.0,  # No rotation for the y-axis
                     range_z=0.0,  # No rotation for the z-axis
                     prob=0.5,     # Ensure that the rotation is always applied
                     keep_size=True, # Keep the same image size after rotation (reshape=False equivalent)
                     padding_mode="zeros"
                 ),
-                # ScaleIntensityRange(a_min=-500, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
                 CenterSpatialCrop(roi_size=(224, 224)),
                 NormalizeIntensity()
             ])
-        
-        else:
-            self.transforms = Compose([
+
+            self.gland_mask_transforms = Compose([
                 EnsureChannelFirst(),
-                # ScaleIntensityRange(a_min=-500, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
+                RandAffine(
+                    prob=0.5,
+                    translate_range=(0, 16, 16)
+                ),
+                RandFlip(prob=0.5, spatial_axis=1),
+                RandRotate(
+                    range_x=12,
+                    range_y=0.0,
+                    range_z=0.0,
+                    prob=0.5,
+                    keep_size=True,
+                    padding_mode="zeros"
+                ),
+                CenterSpatialCrop(roi_size=(224, 224))
+            ])
+
+        else:
+            self.t2w_transforms = Compose([
+                EnsureChannelFirst(),
                 CenterSpatialCrop(roi_size=(224, 224)),
                 NormalizeIntensity()
+            ])
+            self.gland_mask_transforms = Compose([
+                EnsureChannelFirst(),
+                CenterSpatialCrop(roi_size=(224, 224))
             ])
 
 
@@ -188,16 +210,20 @@ class FastMRIDataset(data.Dataset):
 
 
     def __getitem__(self, index):
-        # print(index)
-        image_2d = self.data_df.iloc[index]['image']
+        t2w_image_2d = self.data_df.iloc[index]['t2w']
+        gland_mask_2d = self.data_df.iloc[index]['gland_mask']
         label = self.data_df.iloc[index]['label']
 
-        # Apply transforms
-        transformed_image = self.transforms(image_2d)
-        image = torch.FloatTensor(transformed_image)
+        # Apply transforms to each component
+        transformed_t2w = self.t2w_transforms(t2w_image_2d)
+        transformed_gland_mask = self.gland_mask_transforms(gland_mask_2d)
+
+        t2w = torch.FloatTensor(transformed_t2w)
+        gland_mask = torch.FloatTensor(transformed_gland_mask)
+        # image = torch.FloatTensor(torch.cat([transformed_data['t2w'], transformed_data['gland_mask']], dim=0))
         label = torch.FloatTensor([label])
 
-        return image, label
+        return t2w, gland_mask, label
 
 
     def __len__(self):

@@ -24,9 +24,13 @@ def ConvNext_model(args, diff=False):
         weights_cn = ConvNeXt_Base_Weights.DEFAULT                                  
         model = convnext_base(weights=weights_cn)                                  
         model.features[0][0] = nn.Conv2d(1, 128, kernel_size=(4, 4), stride=(4, 4))   
-        if diff:
-            model.features[0][0] = nn.Conv2d(2, 128, kernel_size=(4, 4), stride=(4, 4))   
 
+        if args['concat_mask']:
+            model.features[0][0] = nn.Conv2d(2, 128, kernel_size=(4, 4), stride=(4, 4))  
+
+        if diff:
+            model.features[0][0] = nn.Conv2d(2, 128, kernel_size=(4, 4), stride=(4, 4))  
+         
         model.classifier[2] = nn.Linear(in_features=1024, out_features=1, bias=True)  
 
     elif args['model_args']['model'] == "tiny":
