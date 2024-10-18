@@ -217,6 +217,16 @@ def train_network(config):
     with open(savepath, 'wb') as f:                                   
         pickle.dump(saver, f)
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def get_parser():
     """
     Create an argument parser for the main script.
@@ -227,8 +237,8 @@ def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_file', type=str, required=True)           # config file which has all the training inputs
     parser.add_argument('--index_seed', type=int, required=True)            # Seed number for reproducibility for all numpy, random, torch
-    parser.add_argument('--concat_mask', type=bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
-    parser.add_argument('--concat_adc', type=bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
+    parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
+    parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
     return parser
 
 
