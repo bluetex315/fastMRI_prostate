@@ -236,7 +236,7 @@ def get_parser():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_file', type=str, required=True)           # config file which has all the training inputs
-    # parser.add_argument('--index_seed', type=int, required=True)            # Seed number for reproducibility for all numpy, random, torch
+    parser.add_argument('--index_seed', type=int)                   # Seed number for reproducibility for all numpy, random, torch, if not provided, loop through all seeds
     parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
     return parser
@@ -248,6 +248,12 @@ if __name__ == '__main__':
     """
     args_con = get_parser().parse_args()
     seed_list = [10383, 44820, 238, 3939, 74783, 92938, 143, 2992, 7373, 988]
+
+    # Check if a specific seed index is provided
+    if args_con.index_seed is not None:
+        # Use the specific seed from the list
+        seed_select = seed_list[args_con.index_seed]
+        seed_list = [seed_select]
 
     # Loop through all seeds
     for seed_select in seed_list:
@@ -281,37 +287,3 @@ if __name__ == '__main__':
         # Print configuration and start training
         print(args)
         train_network(args)
-
-
-# if __name__ == '__main__':
-#     """
-#     Main script for training the ConvNext model.
-#     """
-#     args_con = get_parser().parse_args() 
-#     seed_list = [10383, 44820, 238, 3939, 74783, 92938, 143, 2992, 7373, 988]           
-#     seed_select =  seed_list[args_con.index_seed]                                      
-    
-#     with open(args_con.config_file) as f:
-#         args = yaml.load(f, Loader=yaml.UnsafeLoader) 
-
-#     args['concat_mask'] = args_con.concat_mask
-#     args['concat_adc'] = args_con.concat_adc
-
-#     main_fol = args["results_fol"]
-#     args['model_args']['rundir'] = os.path.join(main_fol, args['model_args']['rundir'] + '_SEED_' + str(seed_select)) 
-#     print("Model rundir:{}".format(args['model_args']['rundir']))
-#     if not os.path.isdir(args['model_args']["rundir"]):
-#         os.makedirs(os.path.join(args['model_args']["rundir"]))                                   
-
-#     copyfile(args_con.config_file, os.path.join(args['model_args']['rundir'], 'params.txt'))
-    
-#     torch.manual_seed(seed_select)                                           
-#     torch.cuda.manual_seed(seed_select)                               
-#     torch.backends.cudnn.deterministic = True
-#     torch.backends.cudnn.benchmark = False
-#     np.random.seed(seed_select)
-
-#     print(args)
-#     train_network(args)
-
-# %%
