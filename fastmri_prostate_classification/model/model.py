@@ -24,7 +24,7 @@ def ConvNext_model(args, diff=False):
         weights_cn = ConvNeXt_Base_Weights.DEFAULT                                  
         model = convnext_base(weights=weights_cn)  
 
-        input_channels = 1 + int(args['concat_mask']) + int(args['concat_adc'])
+        input_channels = 2 + int(args['concat_mask']) + int(args['concat_t2w'])
 
         model.features[0][0] = nn.Conv2d(input_channels, 128, kernel_size=(4, 4), stride=(4, 4))   
 
