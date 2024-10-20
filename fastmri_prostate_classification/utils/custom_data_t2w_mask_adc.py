@@ -268,23 +268,7 @@ class FastMRIDataset(data.Dataset):
                 NormalizeIntensityd(keys=norm_keys)
             ])
 
-    # #  https://doi.org/10.1371/journal.pmed.1002699.s001 
-    # def weighted_loss(self, prediction, target):
-    #     """
-    #     Compute the weighted cross-entropy loss.
-
-    #     Parameters:
-    #     - prediction (Tensor): Model predictions.
-    #     - target (Tensor): Ground truth labels.
-
-    #     Returns:
-    #     - loss (Tensor): Weighted cross-entropy loss.
-    #     """
-    #     weights_npy = np.array([self.weights[int(t)] for t in target.data])    
-    #     weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
-    #     loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
-    #     return loss
-
+    #  https://doi.org/10.1371/journal.pmed.1002699.s001 
     def weighted_loss(self, prediction, target):
         """
         Compute the weighted cross-entropy loss.
@@ -296,10 +280,26 @@ class FastMRIDataset(data.Dataset):
         Returns:
         - loss (Tensor): Weighted cross-entropy loss.
         """
-        # weights_npy = np.array([self.weights[int(t)] for t in target.data])    
-        # weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
-        loss = sigmoid_focal_loss(prediction, target, alpha=0.25, gamma=2) 
+        weights_npy = np.array([self.weights[int(t)] for t in target.data])    
+        weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
+        loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
         return loss
+
+    # def weighted_loss(self, prediction, target):
+    #     """
+    #     Compute the weighted cross-entropy loss.
+
+    #     Parameters:
+    #     - prediction (Tensor): Model predictions.
+    #     - target (Tensor): Ground truth labels.
+
+    #     Returns:
+    #     - loss (Tensor): Weighted cross-entropy loss.
+    #     """
+    #     # weights_npy = np.array([self.weights[int(t)] for t in target.data])    
+    #     # weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
+    #     loss = sigmoid_focal_loss(prediction, target, alpha=0.25, gamma=2) 
+    #     return loss
 
     def __getitem__(self, index):
 
