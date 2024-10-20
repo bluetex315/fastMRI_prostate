@@ -239,6 +239,7 @@ def get_parser():
     parser.add_argument('--index_seed', type=int)                   # Seed number for reproducibility for all numpy, random, torch, if not provided, loop through all seeds
     parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
+    parser.add_argument('--use_2_5d', type=str2bool, required=True, help='Set to True or False to specify whether to use 2.5D.')
     return parser
 
 
@@ -264,6 +265,7 @@ if __name__ == '__main__':
         # Set additional arguments
         args['concat_mask'] = args_con.concat_mask
         args['concat_adc'] = args_con.concat_adc
+        args['use_2_5d'] = args_con.use_2_5d
 
         # Set the model directory based on the seed
         main_fol = args["results_fol"]

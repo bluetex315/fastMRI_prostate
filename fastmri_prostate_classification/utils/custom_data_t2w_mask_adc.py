@@ -17,6 +17,12 @@ from monai.transforms import (
 from monai.data import Dataset, DataLoader
 
 
+def pad_slice(slice_data):
+    """
+    Pad a slice with zeros if it does not exist (for boundary conditions).
+    """
+    return np.zeros(slice_data.shape)
+
 # Define a custom wrapper to apply intensity scaling with probability
 def probabilistic_intensity_scaling(image, probability=0.5):
     if random.random() < probability:
@@ -285,38 +291,111 @@ class FastMRIDataset(data.Dataset):
         loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
         return loss
 
-    # def weighted_loss(self, prediction, target):
-    #     """
-    #     Compute the weighted cross-entropy loss.
+    # def __getitem__(self, index):
 
-    #     Parameters:
-    #     - prediction (Tensor): Model predictions.
-    #     - target (Tensor): Ground truth labels.
+    #     data_dict = {"t2w": self.data_df.iloc[index]['t2w']}
 
-    #     Returns:
-    #     - loss (Tensor): Weighted cross-entropy loss.
-    #     """
-    #     # weights_npy = np.array([self.weights[int(t)] for t in target.data])    
-    #     # weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
-    #     loss = sigmoid_focal_loss(prediction, target, alpha=0.25, gamma=2) 
-    #     return loss
+    #     # add 'adc' and 'mask' if the configuration requires it
+    #     if self.config.get('concat_adc', True):
+    #         data_dict["adc"] = self.data_df.iloc[index]['adc']
+    #         # print(data_dict['adc'].shape)
+    #     if self.config.get('concat_mask', True):
+    #         data_dict["gland_mask"] = self.data_df.iloc[index]['gland_mask']
+    #         # print(data_dict['gland_mask'].shape)
+        
+    #     label = self.data_df.iloc[index]['label']
+        
+    #     transformed = self.transforms(data_dict)
+
+    #     image = torch.FloatTensor(transformed['t2w'])
+
+    #     # Concatenate adc if it exists in the transformed data
+    #     if self.config.get('concat_adc', True) and 'adc' in transformed:
+    #         image = torch.cat((image, transformed['adc']), dim=0)
+    #     if self.config.get('concat_mask', True) and 'gland_mask' in transformed:
+    #         image = torch.cat((image, transformed['gland_mask']), dim=0)
+
+    #     label = torch.FloatTensor([label])
+
+    #     return image, label
+    
 
     def __getitem__(self, index):
+        # Extract the main slice data
 
-        data_dict = {"t2w": self.data_df.iloc[index]['t2w']}
-
-        # add 'adc' and 'mask' if the configuration requires it
+        data_dict = {
+            "t2w": self.data_df.iloc[index]['t2w'], 
+            "patient_id": self.data_df.iloc[index]['patient_id'],
+            "slice_idx": self.data_df.iloc[index]['slice_idx'],
+        }
+        
+        # Add ADC and gland mask if required by configuration
         if self.config.get('concat_adc', True):
             data_dict["adc"] = self.data_df.iloc[index]['adc']
-            # print(data_dict['adc'].shape)
         if self.config.get('concat_mask', True):
             data_dict["gland_mask"] = self.data_df.iloc[index]['gland_mask']
-            # print(data_dict['gland_mask'].shape)
-        
-        label = self.data_df.iloc[index]['label']
-        
-        transformed = self.transforms(data_dict)
 
+        label = self.data_df.iloc[index]['label']
+
+        if self.config.get('use_2_5d', True):
+            patient_id = self.data_df.iloc[index]['patient_id']
+            slice_idx = self.data_df.iloc[index]['slice_idx']
+            # print("patient id and slice_idx", patient_id, slice_idx)
+
+            # Get slices i-1, i, i+1
+            t2w_slices = []
+            adc_slices = []
+            gland_mask_slices = []
+
+            for offset in [-1, 0, 1]:
+
+                current_idx = slice_idx + offset
+
+                # Handle boundary conditions by padding
+                filtered_df = self.data_df[
+                    (self.data_df['patient_id'] == patient_id) & (self.data_df['slice_idx'] == current_idx)
+                ]   
+                
+                if len(filtered_df) == 0:
+                    # If the neighboring slice does not exist, pad with zeros
+                    t2w_slice = pad_slice(data_dict['t2w'])
+                    adc_slice = pad_slice(data_dict.get('adc')) if 'adc' in data_dict else None
+                    gland_mask_slice = pad_slice(data_dict.get('gland_mask')) if 'gland_mask' in data_dict else None
+
+                else:
+                    # If the neighboring slice exists, get it from the dataframe
+                    t2w_slice = filtered_df.iloc[0]['t2w']
+                    adc_slice = filtered_df.iloc[0]['adc'] if 'adc' in data_dict else None
+                    gland_mask_slice = filtered_df.iloc[0]['gland_mask'] if 'gland_mask' in data_dict else None
+
+                # Collect slices
+                t2w_slices.append(t2w_slice)
+                if adc_slice is not None:
+                    adc_slices.append(adc_slice)
+                if gland_mask_slice is not None:
+                    gland_mask_slices.append(gland_mask_slice)
+
+            # Stack the slices to create 2.5D input
+            t2w_2_5d = np.stack(t2w_slices, axis=0)
+
+            # Prepare final multi-channel input
+            final_input = {"t2w": t2w_2_5d}
+            if self.config.get('concat_adc', True) and adc_slices:
+                adc_2_5d = np.stack(adc_slices, axis=0)
+                final_input["adc"] = adc_2_5d
+
+            if self.config.get('concat_mask', True) and gland_mask_slices:
+                mask_2_5d = np.stack(gland_mask_slices, axis=0)
+                final_input["gland_mask"] = mask_2_5d
+
+            # Apply transformations
+            transformed = self.transforms(final_input)
+
+        else:
+            # If not using 2.5D, just use the original slice
+            transformed = self.transforms(data_dict)
+        
+        # Prepare the image tensor
         image = torch.FloatTensor(transformed['t2w'])
 
         # Concatenate adc if it exists in the transformed data
@@ -325,10 +404,10 @@ class FastMRIDataset(data.Dataset):
         if self.config.get('concat_mask', True) and 'gland_mask' in transformed:
             image = torch.cat((image, transformed['gland_mask']), dim=0)
 
+        # Convert label to tensor
         label = torch.FloatTensor([label])
 
         return image, label
-
 
     def __len__(self):
         return len(self.data_df)

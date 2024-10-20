@@ -26,6 +26,9 @@ def ConvNext_model(args, diff=False):
 
         input_channels = 1 + int(args['concat_mask']) + int(args['concat_adc'])
 
+        if args['use_2_5d']:
+            input_channels = input_channels * 3
+        
         model.features[0][0] = nn.Conv2d(input_channels, 128, kernel_size=(4, 4), stride=(4, 4))   
 
         if diff:
