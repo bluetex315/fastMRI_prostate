@@ -120,8 +120,8 @@ class FastMRIDataset(data.Dataset):
         full_data_df = pd.DataFrame(data_list)
 
         # Split the dataset into train, validation, and test sets using train_test_split
-        train_df, temp_df = train_test_split(full_data_df, test_size=0.3, random_state=42)
-        val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42)
+        train_df, temp_df = train_test_split(full_data_df, test_size=0.3, random_state=self.config['seed'])
+        val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=self.config['seed'])
 
         expanded_data_list = []
         
@@ -281,25 +281,12 @@ class FastMRIDataset(data.Dataset):
         - loss (Tensor): Weighted cross-entropy loss.
         """
         weights_npy = np.array([self.weights[int(t)] for t in target.data])    
-        weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
-        loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
+        weights_tensor = torch.FloatTensor(weights_npy).cuda()          
+        if self.config['focal_loss']:
+            loss = sigmoid_focal_loss(prediction, target, alpha=0.95, gamma=2, reduction='mean') 
+        else:
+            loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
         return loss
-
-    # def weighted_loss(self, prediction, target):
-    #     """
-    #     Compute the weighted cross-entropy loss.
-
-    #     Parameters:
-    #     - prediction (Tensor): Model predictions.
-    #     - target (Tensor): Ground truth labels.
-
-    #     Returns:
-    #     - loss (Tensor): Weighted cross-entropy loss.
-    #     """
-    #     # weights_npy = np.array([self.weights[int(t)] for t in target.data])    
-    #     # weights_tensor = torch.FloatTensor(weights_npy).cuda()                 
-    #     loss = sigmoid_focal_loss(prediction, target, alpha=0.25, gamma=2) 
-    #     return loss
 
     def __getitem__(self, index):
 
