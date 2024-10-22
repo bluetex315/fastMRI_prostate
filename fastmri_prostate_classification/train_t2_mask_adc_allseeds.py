@@ -221,28 +221,28 @@ def train_network(config):
         saver[e]['train_auc'] = AUC_train
         saver[e]['train_loss'] = current_loss_train
 
-        if config['training']['save_ROC_AUC']:
-            if current_loss_val < lowest_val_loss:
-                lowest_val_loss = current_loss_val
-                lowest_val_epoch = e
+        if current_loss_val < lowest_val_loss:
+            lowest_val_loss = current_loss_val
+            lowest_val_epoch = e
 
-                fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
-                roc_auc = metrics.auc(fpr, tpr)
+            if config['training']['save_ROC_AUC']:
+                    fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
+                    roc_auc = metrics.auc(fpr, tpr)
 
-                plt.figure()
-                plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-                plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-                plt.xlabel('False Positive Rate')
-                plt.ylabel('True Positive Rate')
-                plt.title('Receiver Operating Characteristic (ROC)')
-                plt.legend(loc='lower right')
-                save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
-                plt.savefig(save_path)
-                plt.close()
+                    plt.figure()
+                    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+                    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+                    plt.xlabel('False Positive Rate')
+                    plt.ylabel('True Positive Rate')
+                    plt.title('Receiver Operating Characteristic (ROC)')
+                    plt.legend(loc='lower right')
+                    save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
+                    plt.savefig(save_path)
+                    plt.close()
 
-        if config['training']['save_model']:
-            PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
-            torch.save(model.state_dict(), PATH)                                                  
+            if config['training']['save_model']:
+                PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
+                torch.save(model.state_dict(), PATH)                                                  
     
     writer.close()                                                      
     savepath = os.path.join(dirin, 'model_outputs_raw.pkl')            
