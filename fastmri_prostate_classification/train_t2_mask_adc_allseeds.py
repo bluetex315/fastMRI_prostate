@@ -302,7 +302,14 @@ if __name__ == '__main__':
 
         # Set the model directory based on the seed
         main_fol = args["results_fol"]
-        args['model_args']['rundir'] = os.path.join(main_fol, args['model_args']['rundir'] + '_SEED_' + str(seed_select))
+        subfolder = 't2w'  # Always include 't2w' as it's the base modality
+
+        if args['concat_adc']:
+            subfolder += '_adc'
+        if args['concat_mask']:
+            subfolder += '_mask'
+
+        args['model_args']['rundir'] = os.path.join(main_fol, subfolder, args['model_args']['rundir'] + '_SEED_' + str(seed_select))
         print("Model rundir:{}".format(args['model_args']['rundir']))
 
         # Create directory if it doesn't exist
