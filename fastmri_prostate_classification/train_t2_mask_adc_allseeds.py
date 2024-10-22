@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import yaml
 import pickle
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 def train(model, optimizer, scheduler, train_loader, device):
     """
@@ -154,12 +155,17 @@ def train_network(config):
     model = ConvNext_model(config)
     model.to(device)
     print('Number of model parameters:{}'.format(sum(p.numel() for p in model.parameters())))
-    optimizer, scheduler, scheduler2 = get_optim_sched(model, config) 
+    if config['model_args']['warm_up']:
+        optimizer, scheduler, warmup_scheduler, scheduler2 = get_optim_sched(model, config) 
+    else:
+        optimizer, scheduler, scheduler2 = get_optim_sched(model, config) 
 
     dirin = config['model_args']['rundir']
     writer = SummaryWriter(log_dir = config['model_args']['rundir'])  
     
-    saver = dict()                                      
+    saver = dict()    
+    lowest_val_loss = float('inf')
+    lowest_val_epoch = -1                                  
     for e in range(config['training']['max_epochs']):  
         model.train()                                 
         AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, device)       
@@ -176,7 +182,14 @@ def train_network(config):
             scheduler2.step(AUC_val)
         else:
             pass    
-        scheduler.step()
+        
+        if config['model_args']['warm_up']:
+            if e < config['model_args']['warmup_epochs']:
+                warmup_scheduler.step()
+            else:
+                scheduler.step()
+        else:
+            scheduler.step()
 
         writer.add_scalar("Loss/Train", current_loss_train, e)    
         writer.add_scalar("Loss/Validation", current_loss_val, e)  
@@ -207,6 +220,25 @@ def train_network(config):
         saver[e]['train_labels'] = labels_train
         saver[e]['train_auc'] = AUC_train
         saver[e]['train_loss'] = current_loss_train
+
+        if config['training']['save_ROC_AUC']:
+            if current_loss_val < lowest_val_loss:
+                lowest_val_loss = current_loss_val
+                lowest_val_epoch = e
+
+                fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
+                roc_auc = metrics.auc(fpr, tpr)
+
+                plt.figure()
+                plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+                plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title('Receiver Operating Characteristic (ROC)')
+                plt.legend(loc='lower right')
+                save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
+                plt.savefig(save_path)
+                plt.close()
 
         if config['training']['save_model']:
             PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
@@ -239,6 +271,7 @@ def get_parser():
     parser.add_argument('--index_seed', type=int)                   # Seed number for reproducibility for all numpy, random, torch, if not provided, loop through all seeds
     parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
+    parser.add_argument('--focal_loss', type=str2bool, default=False, help='whether to use focal loss instead of weighted bce')
     parser.add_argument('--use_2_5d', type=str2bool, required=True, help='Set to True or False to specify whether to use 2.5D.')
     return parser
 
@@ -265,6 +298,8 @@ if __name__ == '__main__':
         # Set additional arguments
         args['concat_mask'] = args_con.concat_mask
         args['concat_adc'] = args_con.concat_adc
+        args['seed'] = seed_select
+        args['focal_loss'] = args_con.focal_loss
         args['use_2_5d'] = args_con.use_2_5d
 
         # Set the model directory based on the seed

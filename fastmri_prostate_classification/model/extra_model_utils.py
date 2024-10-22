@@ -51,4 +51,8 @@ def get_optim_sched(model, args):
 
     scheduler2 = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, verbose=True)  # fixed gamma
 
-    return optimizer, scheduler, scheduler2
+    if args['model_args']['warm_up']:
+        warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: (epoch + 1) / args['model_args']['warmup_epochs'] if epoch < args['model_args']['warmup_epochs'] else 1.0)
+        return optimizer, scheduler, warmup_scheduler, scheduler2
+    else:
+        return optimizer, scheduler, scheduler2
