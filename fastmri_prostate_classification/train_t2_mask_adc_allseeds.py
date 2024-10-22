@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import yaml
 import pickle
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 def train(model, optimizer, scheduler, train_loader, device):
     """
@@ -225,7 +226,7 @@ def train_network(config):
                 lowest_val_loss = current_loss_val
                 lowest_val_epoch = e
 
-                fpr, tpr, _ = metrics.roc_curve(labels_validation, raw_preds_validation)
+                fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
                 roc_auc = metrics.auc(fpr, tpr)
 
                 plt.figure()
@@ -238,7 +239,7 @@ def train_network(config):
                 save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
                 plt.savefig(save_path)
                 plt.close()
-                
+
         if config['training']['save_model']:
             PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
             torch.save(model.state_dict(), PATH)                                                  
