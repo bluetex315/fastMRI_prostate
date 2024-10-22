@@ -1,36 +1,50 @@
-import numpy as np
-from scipy.stats import sem
-from sklearn.metrics import roc_auc_score
+import torch
+from monai.transforms import EnsureChannelFirstD
 
-y_pred = np.array([0.21, 0.32, 0.63, 0.35, 0.92, 0.79, 0.82, 0.99, 0.04])
-y_true = np.array([0,    1,    0,    0,    1,    1,    0,    1,    0   ])
+def test_ensure_channel_d():
+    # Initialize the EnsureChannelD transform
+    # Specify the keys to which the transform should be applied
+    # Here, we'll assume the data is under the key 'image'
+    ensure_channel = EnsureChannelFirstD(keys=['image'])
 
-print("Original ROC area: {:0.3f}".format(roc_auc_score(y_true, y_pred)))
+    # Create sample data
+    # Case 1: Input tensor already has a channel dimension (C, H, W)
+    tensor_with_channel = torch.randn(3, 224, 224)  # Example with 3 channels
 
-n_bootstraps = 1000
-rng_seed = 42  # control reproducibility
-bootstrapped_scores = []
+    # Case 2: Input tensor without a channel dimension (H, W)
+    tensor_without_channel = torch.randn(224, 224)  # Example with no channels
 
-rng = np.random.RandomState(rng_seed)
-for i in range(n_bootstraps):
-    # bootstrap by sampling with replacement on the prediction indices
-    indices = rng.randint(0, len(y_pred), len(y_pred))
-    if len(np.unique(y_true[indices])) < 2:
-        # We need at least one positive and one negative sample for ROC AUC
-        # to be defined: reject the sample
-        continue
+    # Wrap tensors in a dictionary as MONAI's dictionary-based transforms expect dict inputs
+    data_with_channel = {'image': tensor_with_channel}
+    data_without_channel = {'image': tensor_without_channel}
 
-    score = roc_auc_score(y_true[indices], y_pred[indices])
-    bootstrapped_scores.append(score)
-    print("Bootstrap #{} ROC area: {:0.3f}".format(i + 1, score))
+    # Apply the EnsureChannelD transform
+    # transformed_with_channel = ensure_channel(data_with_channel)
+    transformed_without_channel = ensure_channel(data_without_channel)
 
-sorted_scores = np.array(bootstrapped_scores)
-sorted_scores.sort()
+    # Retrieve the transformed tensors
+    # transformed_tensor_with_channel = transformed_with_channel['image']
+    transformed_tensor_without_channel = transformed_without_channel['image']
 
-# Computing the lower and upper bound of the 90% confidence interval
-# You can change the bounds percentiles to 0.025 and 0.975 to get
-# a 95% confidence interval instead.
-confidence_lower = sorted_scores[int(0.05 * len(sorted_scores))]
-confidence_upper = sorted_scores[int(0.95 * len(sorted_scores))]
-print("Confidence interval for the score: [{:0.3f} - {:0.3}]".format(
-    confidence_lower, confidence_upper))
+    # Print shapes to verify
+    print("=== Testing EnsureChannelD ===\n")
+
+    # print("Case 1: Input tensor already has a channel dimension (C, H, W)")
+    # print(f"Original shape: {tensor_with_channel.shape}")
+    # print(f"Transformed shape: {transformed_tensor_with_channel.shape}\n")
+
+    print("Case 2: Input tensor without a channel dimension (H, W)")
+    print(f"Original shape: {tensor_without_channel.shape}")
+    print(f"Transformed shape: {transformed_tensor_without_channel.shape}\n")
+
+    # Additional Assertions (optional)
+    # assert transformed_tensor_with_channel.shape == tensor_with_channel.shape, \
+    #     "EnsureChannelD should not alter tensors that already have the channel dimension."
+
+    assert transformed_tensor_without_channel.shape[0] == 1, \
+        "EnsureChannelD should add a channel dimension to tensors without one."
+
+    print("All tests passed successfully!")
+
+if __name__ == "__main__":
+    test_ensure_channel_d()

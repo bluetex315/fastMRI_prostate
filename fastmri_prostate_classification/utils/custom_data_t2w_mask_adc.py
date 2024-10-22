@@ -21,7 +21,7 @@ def pad_slice(slice_data):
     """
     Pad a slice with zeros if it does not exist (for boundary conditions).
     """
-    return np.zeros(slice_data.shape)
+    return torch.zeros_like(slice_data)
 
 # Define a custom wrapper to apply intensity scaling with probability
 def probabilistic_intensity_scaling(image, probability=0.5):
@@ -379,16 +379,16 @@ class FastMRIDataset(data.Dataset):
                     gland_mask_slices.append(gland_mask_slice)
 
             # Stack the slices to create 2.5D input
-            t2w_2_5d = np.stack(t2w_slices, axis=0)
+            t2w_2_5d = torch.stack(t2w_slices, axis=0)
 
             # Prepare final multi-channel input
             final_input = {"t2w": t2w_2_5d}
             if self.config.get('concat_adc', True) and adc_slices:
-                adc_2_5d = np.stack(adc_slices, axis=0)
+                adc_2_5d = torch.stack(adc_slices, axis=0)
                 final_input["adc"] = adc_2_5d
 
             if self.config.get('concat_mask', True) and gland_mask_slices:
-                mask_2_5d = np.stack(gland_mask_slices, axis=0)
+                mask_2_5d = torch.stack(gland_mask_slices, axis=0)
                 final_input["gland_mask"] = mask_2_5d
 
             # Apply transformations
