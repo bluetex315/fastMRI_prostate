@@ -14,6 +14,23 @@ import yaml
 import pickle
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import monai
+import nibabel as nib
+
+
+def save_images(inputs, save_dir, prefix):
+    os.makedirs(save_dir, exist_ok=True)
+    for i in range(4):
+        metadata = inputs[i].meta if isinstance(inputs[i], monai.data.MetaTensor) else None
+        # print(metadata)
+        img = inputs[i].cpu().numpy()
+        for c in range(img.shape[0]):  # Iterate over each channel
+            nifti_img = nib.Nifti1Image(img[c], affine=np.eye(4))
+            # if metadata is not None:
+            #     nifti_img.header.extensions.append(('metadata', str(metadata)))
+            #     print("success")
+            nib.save(nifti_img, os.path.join(save_dir, f'{prefix}_image_{i}_channel_{c}.nii.gz'))
+            print("save success at", os.path.join(save_dir, f'{prefix}_image_{i}_channel_{c}.nii.gz'))
 
 def train(model, optimizer, scheduler, train_loader, device):
     """
@@ -167,6 +184,20 @@ def train_network(config):
     lowest_val_loss = float('inf')
     lowest_val_epoch = -1                                  
     for e in range(config['training']['max_epochs']):  
+        # Save some training or validation images before and after transforms if saveims is True
+        if config['training'].get('saveims', True) and e == 0:
+            save_dir = os.path.join(config['model_args']['rundir'], 'saved_images_epoch_{}'.format(e))
+
+            # Save the first 4 training images before and after transform as NIfTI files
+            inputs_train, labels_train = next(iter(train_loader))
+            print(inputs_train.shape, type(inputs_train))
+            save_images(inputs_train, save_dir, 'inputs_train')
+
+            # Save the first 4 validation images before and after transform as NIfTI files
+            inputs_val, labels_val = next(iter(valid_loader))
+            print(inputs_val.shape, type(inputs_val))
+            save_images(inputs_val, save_dir, 'inputs_val')
+
         model.train()                                 
         AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, device)       
         AUC_val, current_loss_val, acc_val, recall_val, f1_val, conf_matrix_val, labels_validation, raw_preds_validation  = val(model, valid_loader, device)     
