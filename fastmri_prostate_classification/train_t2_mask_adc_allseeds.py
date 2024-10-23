@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 import monai
 import nibabel as nib
 
-
 def save_images(inputs, save_dir, prefix):
     os.makedirs(save_dir, exist_ok=True)
     for i in range(4):
@@ -161,6 +160,7 @@ def train_network(config):
         config['data']['datapath'], 
         config["data"]["labelpath"],
         config["data"]["glandmask_path"], 
+        config['data']['t2w_csv_path'],
         int(config['data']['norm_type']),  
         config['training']['augment'], 
         config['training']['saveims'], 
@@ -182,7 +182,9 @@ def train_network(config):
     
     saver = dict()    
     lowest_val_loss = float('inf')
-    lowest_val_epoch = -1                                  
+    lowest_val_epoch = -1   
+    lowest_val_losses = []
+
     for e in range(config['training']['max_epochs']):  
         # Save some training or validation images before and after transforms if saveims is True
         if config['training'].get('saveims', True) and e == 0:
@@ -252,24 +254,37 @@ def train_network(config):
         saver[e]['train_auc'] = AUC_train
         saver[e]['train_loss'] = current_loss_train
 
-        if current_loss_val < lowest_val_loss:
-            lowest_val_loss = current_loss_val
-            lowest_val_epoch = e
+        # Check if we should update the list of lowest losses
+        if len(lowest_val_losses) < 5 or current_loss_val < lowest_val_losses[-1][0]:
+            # If we already have 5 checkpoints, remove the highest loss checkpoint
+            if len(lowest_val_losses) == 5:
+                _, epoch_to_remove = lowest_val_losses[-1]
+                # Remove the corresponding model checkpoint file
+                checkpoint_to_remove = os.path.join(config['model_args']['rundir'], f'model_epoch_{epoch_to_remove}.pth')
+                if os.path.exists(checkpoint_to_remove):
+                    os.remove(checkpoint_to_remove)
+                # Remove the highest loss from the list
+                lowest_val_losses.pop()
+
+            # Add the current loss and epoch to the list
+            lowest_val_losses.append((current_loss_val, e))
+            # Sort the list in ascending order of loss to keep the lowest losses at the beginning
+            lowest_val_losses = sorted(lowest_val_losses, key=lambda x: x[0])
 
             if config['training']['save_ROC_AUC']:
-                    fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
-                    roc_auc = metrics.auc(fpr, tpr)
+                fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
+                roc_auc = metrics.auc(fpr, tpr)
 
-                    plt.figure()
-                    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-                    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-                    plt.xlabel('False Positive Rate')
-                    plt.ylabel('True Positive Rate')
-                    plt.title('Receiver Operating Characteristic (ROC)')
-                    plt.legend(loc='lower right')
-                    save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
-                    plt.savefig(save_path)
-                    plt.close()
+                plt.figure()
+                plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+                plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title('Receiver Operating Characteristic (ROC)')
+                plt.legend(loc='lower right')
+                save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
+                plt.savefig(save_path)
+                plt.close()
 
             if config['training']['save_model']:
                 PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 

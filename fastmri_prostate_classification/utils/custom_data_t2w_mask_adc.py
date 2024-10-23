@@ -59,12 +59,13 @@ class FastMRIDataset(data.Dataset):
     - augment (bool): Flag indicating whether to apply data augmentation.
     - split (str): One of 'train', 'val', or 'test' indicating the dataset split.
     """
-    def __init__(self, config, datapath, labelpath, gland_maskpath, norm_type, augment, split):
+    def __init__(self, config, datapath, labelpath, gland_maskpath, t2w_csv_path, norm_type, augment, split):
         super().__init__()
         self.config = config
         self.datapath = datapath
         self.labelpath = labelpath
         self.gland_maskpath = gland_maskpath
+        self.t2w_csv_path = t2w_csv_path
         self.norm_type = norm_type
         self.augment = augment
         self.split = split
@@ -118,19 +119,25 @@ class FastMRIDataset(data.Dataset):
             data_list.append(data_entry)
 
         full_data_df = pd.DataFrame(data_list)
+        full_data_df['patient_id'] = full_data_df['patient_id'].astype(int)
+
+        datasheet = pd.read_csv(self.t2w_csv_path)
+        datasheet_unique = datasheet[['fastmri_pt_id', 'data_split']].drop_duplicates()
+        datasheet_unique = datasheet_unique.rename(columns={'fastmri_pt_id': 'patient_id'})
+        full_data_merged = pd.merge(full_data_df, datasheet_unique, on='patient_id', how='left')
 
         # Split the dataset into train, validation, and test sets using train_test_split
-        train_df, temp_df = train_test_split(full_data_df, test_size=0.3, random_state=self.config['seed'])
-        val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=self.config['seed'])
+        # train_df, temp_df = train_test_split(full_data_df, test_size=0.3, random_state=self.config['seed'])
+        # val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=self.config['seed'])
 
         expanded_data_list = []
         
         if split == 'train':
-            split_df = train_df.reset_index(drop=True)
+            split_df = full_data_merged[full_data_merged['data_split'] == "training"].reset_index(drop=True)
         elif split == 'val':
-            split_df = val_df.reset_index(drop=True)
+            split_df = full_data_merged[full_data_merged['data_split'] == "validation"].reset_index(drop=True)
         elif split == 'test':
-            split_df = test_df.reset_index(drop=True)
+            split_df = full_data_merged[full_data_merged['data_split'] == "test"].reset_index(drop=True)
         else:
             raise ValueError("Invalid split value. Must be 'train', 'val', or 'test'.")
         
@@ -321,7 +328,7 @@ class FastMRIDataset(data.Dataset):
         return len(self.data_df)
 
  
-def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, saveims, rundir):
+def load_data(config, datapath, labelpath, gland_maskpath, t2w_csv_path, norm_type, augment, saveims, rundir):
     """
     Load FastMRI prostate data and create DataLoader instances for training, validation, and testing.
 
@@ -337,9 +344,9 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
     - test_loader (DataLoader): DataLoader for the test set.
     """
     # Create datasets
-    train_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment, split='train')
-    valid_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='val')
-    test_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='test')
+    train_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, t2w_csv_path, norm_type, augment, split='train')
+    valid_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, t2w_csv_path, norm_type, augment=False, split='val')
+    test_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, t2w_csv_path, norm_type, augment=False, split='test')
 
     # Create data loaders
     train_loader = DataLoader(train_dataset, batch_size=32, num_workers=4, shuffle=True)
