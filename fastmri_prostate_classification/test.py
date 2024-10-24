@@ -94,17 +94,17 @@ def run_inference(config_t2):
     # fpr_diff, tpr_diff, _ = metrics.roc_curve(labels_diff, raw_preds_test_diff)
     fpr_t2, tpr_t2, _ = metrics.roc_curve(labels_t2, raw_preds_test_t2)
 
-    # plt.title('Receiver Operating Characteristic')
+    plt.title('Receiver Operating Characteristic')
     # plt.plot(fpr_diff, tpr_diff, 'b', label = 'AUC diff = %0.2f' % AUC_test_diff, c= 'red')
-    # plt.plot(fpr_t2, tpr_t2, 'b', label = 'AUC T2= %0.2f' % AUC_test_t2, c= 'blue')
-    # plt.legend(loc = 'lower right')
-    # plt.plot([0, 1], [0, 1],'r--')
-    # plt.xlim([0, 1.02])
-    # plt.ylim([0, 1.02])
-    # plt.ylabel('True Positive Rate')
-    # plt.xlabel('False Positive Rate')
-    # save_png_file = "Test_ROC_Curve_fastMRI_prostate.png"
-    # plt.savefig(save_png_file, bbox_inches = "tight")
+    plt.plot(fpr_t2, tpr_t2, 'b', label = 'AUC T2= %0.2f' % AUC_test_t2, c= 'blue')
+    plt.legend(loc = 'lower right')
+    plt.plot([0, 1], [0, 1],'r--')
+    plt.xlim([0, 1.02])
+    plt.ylim([0, 1.02])
+    plt.ylabel('True Positive Rate')
+    plt.xlabel('False Positive Rate')
+    save_png_file = "Test_ROC_Curve_fastMRI_prostate.png"
+    plt.savefig(save_png_file, bbox_inches = "tight")
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -153,11 +153,17 @@ if __name__ == '__main__':
 
     main_fol_t2 = args_t2["results_fol"]
     # main_fol_dwi = args_diff["results_fol"]
+    subfolder = 't2w'  # Always include 't2w' as it's the base modality
 
-    args_t2['model_args']['rundir'] = os.path.join(main_fol_t2, args_t2['model_args']['rundir'] + '_SEED_' + str(seed_select)) 
+    if args_t2['concat_adc']:
+        subfolder += '_adc'
+    if args_t2['concat_mask']:
+        subfolder += '_mask'
+
+    args_t2['model_args']['rundir'] = os.path.join(main_fol_t2, subfolder, args_t2['model_args']['rundir'] + '_SEED_' + str(seed_select))
+    print("Model rundir T2:{}".format(args_t2['model_args']['rundir']))
     # args_diff['model_args']['rundir'] = os.path.join(main_fol_dwi, args_diff['model_args']['rundir'] + '_SEED_' + str(seed_select)) 
 
-    print("Model rundir T2:{}".format(args_t2['model_args']['rundir']))   
     # print("Model rundir diffusion:{}".format(args_diff['model_args']['rundir']))   
 
     torch.manual_seed(seed_select)                                           

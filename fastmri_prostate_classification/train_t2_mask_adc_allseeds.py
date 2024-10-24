@@ -286,10 +286,12 @@ def train_network(config):
                 plt.savefig(save_path)
                 plt.close()
 
-            if config['training']['save_model']:
-                PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
-                torch.save(model.state_dict(), PATH)                                                  
-    
+            if current_loss_val < lowest_val_loss:
+                lowest_val_loss = current_loss_val
+                if config['training']['save_model']:
+                    PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
+                    torch.save(model.state_dict(), PATH)                                                  
+        
     writer.close()                                                      
     savepath = os.path.join(dirin, 'model_outputs_raw.pkl')            
     with open(savepath, 'wb') as f:                                   
