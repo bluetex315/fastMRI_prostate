@@ -23,9 +23,9 @@ data:
       
 training:
       augment: False                       # True if augmenatation = on see utils/augmentation_3d.py for details
-      saveims: False                       # Recommend True to check on status of training images especially if augment
+      saveims: True                       # Recommend True to check on status of training images especially if augment
       save_ROC_AUC: True                   
       max_epochs: 100                      # max_epochs to train for 
       save_model: True                     # Only save model on final set on tuned models
 load_model_epoch: 4
-results_fol: "../../results_t2"
+results_fol: "../../results_t2_dev_2_5D_3slices_paper_split"

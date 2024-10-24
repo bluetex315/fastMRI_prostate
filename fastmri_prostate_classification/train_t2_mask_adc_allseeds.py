@@ -14,6 +14,22 @@ import yaml
 import pickle
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import monai
+import nibabel as nib
+
+def save_images(inputs, save_dir, prefix):
+    os.makedirs(save_dir, exist_ok=True)
+    for i in range(4):
+        metadata = inputs[i].meta if isinstance(inputs[i], monai.data.MetaTensor) else None
+        # print(metadata)
+        img = inputs[i].cpu().numpy()
+        for c in range(img.shape[0]):  # Iterate over each channel
+            nifti_img = nib.Nifti1Image(img[c], affine=np.eye(4))
+            # if metadata is not None:
+            #     nifti_img.header.extensions.append(('metadata', str(metadata)))
+            #     print("success")
+            nib.save(nifti_img, os.path.join(save_dir, f'{prefix}_image_{i}_channel_{c}.nii.gz'))
+            print("save success at", os.path.join(save_dir, f'{prefix}_image_{i}_channel_{c}.nii.gz'))
 
 def train(model, optimizer, scheduler, train_loader, device):
     """
@@ -165,8 +181,24 @@ def train_network(config):
     
     saver = dict()    
     lowest_val_loss = float('inf')
-    lowest_val_epoch = -1                                  
+    lowest_val_epoch = -1   
+    lowest_val_losses = []
+
     for e in range(config['training']['max_epochs']):  
+
+        if config['training'].get('saveims', True) and e == 0:
+            save_dir = os.path.join(config['model_args']['rundir'], 'saved_images_epoch_{}'.format(e))
+
+            # Save the first 4 training images before and after transform as NIfTI files
+            inputs_train, labels_train = next(iter(train_loader))
+            print(inputs_train.shape, type(inputs_train))
+            save_images(inputs_train, save_dir, 'inputs_train')
+
+            # Save the first 4 validation images before and after transform as NIfTI files
+            inputs_val, labels_val = next(iter(valid_loader))
+            print(inputs_val.shape, type(inputs_val))
+            save_images(inputs_val, save_dir, 'inputs_val')
+            
         model.train()                                 
         AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, device)       
         AUC_val, current_loss_val, acc_val, recall_val, f1_val, conf_matrix_val, labels_validation, raw_preds_validation  = val(model, valid_loader, device)     
@@ -220,12 +252,25 @@ def train_network(config):
         saver[e]['train_labels'] = labels_train
         saver[e]['train_auc'] = AUC_train
         saver[e]['train_loss'] = current_loss_train
+        
+        # Check if we should update the list of lowest losses
+        if len(lowest_val_losses) < 5 or current_loss_val < lowest_val_losses[-1][0]:
+            # If we already have 5 checkpoints, remove the highest loss checkpoint
+            if len(lowest_val_losses) == 5:
+                _, epoch_to_remove = lowest_val_losses[-1]
+                # Remove the corresponding model checkpoint file
+                checkpoint_to_remove = os.path.join(config['model_args']['rundir'], f'model_epoch_{epoch_to_remove}.pth')
+                if os.path.exists(checkpoint_to_remove):
+                    os.remove(checkpoint_to_remove)
+                # Remove the highest loss from the list
+                lowest_val_losses.pop()
 
-        if config['training']['save_ROC_AUC']:
-            if current_loss_val < lowest_val_loss:
-                lowest_val_loss = current_loss_val
-                lowest_val_epoch = e
+            # Add the current loss and epoch to the list
+            lowest_val_losses.append((current_loss_val, e))
+            # Sort the list in ascending order of loss to keep the lowest losses at the beginning
+            lowest_val_losses = sorted(lowest_val_losses, key=lambda x: x[0])
 
+            if config['training']['save_ROC_AUC']:
                 fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
                 roc_auc = metrics.auc(fpr, tpr)
 
@@ -240,10 +285,16 @@ def train_network(config):
                 plt.savefig(save_path)
                 plt.close()
 
-        if config['training']['save_model']:
-            PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
-            torch.save(model.state_dict(), PATH)                                                  
-    
+            if current_loss_val < lowest_val_loss:
+                lowest_val_loss = current_loss_val
+                if config['training']['save_model']:
+                    PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
+                    best_PATH = os.path.join(config['model_args']['rundir'],  'best' + '.pth') 
+      
+                    torch.save(model.state_dict(), PATH)
+                    torch.save(model.state_dict(), best_PATH)     
+                    print(f"best model saved at {best_PATH}")                                           
+        
     writer.close()                                                      
     savepath = os.path.join(dirin, 'model_outputs_raw.pkl')            
     with open(savepath, 'wb') as f:                                   
@@ -275,7 +326,6 @@ def get_parser():
     parser.add_argument('--use_2_5d', type=str2bool, required=True, help='Set to True or False to specify whether to use 2.5D.')
     return parser
 
-
 if __name__ == '__main__':
     """
     Main script for training the ConvNext model with multiple seeds.
@@ -304,7 +354,14 @@ if __name__ == '__main__':
 
         # Set the model directory based on the seed
         main_fol = args["results_fol"]
-        args['model_args']['rundir'] = os.path.join(main_fol, args['model_args']['rundir'] + '_SEED_' + str(seed_select))
+        subfolder = 't2w'  # Always include 't2w' as it's the base modality
+
+        if args['concat_adc']:
+            subfolder += '_adc'
+        if args['concat_mask']:
+            subfolder += '_mask'
+
+        args['model_args']['rundir'] = os.path.join(main_fol, subfolder, args['model_args']['rundir'] + '_SEED_' + str(seed_select))
         print("Model rundir:{}".format(args['model_args']['rundir']))
 
         # Create directory if it doesn't exist

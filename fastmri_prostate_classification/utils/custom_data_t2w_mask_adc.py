@@ -15,7 +15,8 @@ from monai.transforms import (
     Compose, LoadImageD, EnsureChannelFirstd, RandAffined, RandFlipd, RandRotated, ScaleIntensityRanged, CenterSpatialCropd, NormalizeIntensityd, ResampleToMatchd, EnsureChannelFirstd
 )
 from monai.data import Dataset, DataLoader
-
+import monai
+import nibabel as nib
 
 def pad_slice(slice_data):
     """
@@ -240,9 +241,12 @@ class FastMRIDataset(data.Dataset):
             norm_keys.append('adc')
 
         # Define MONAI transforms
-        if split == 'train':  
-            self.transforms = Compose([
-                EnsureChannelFirstd(keys=load_keys),
+        if split == 'train':
+            if self.config.get('use_2_5d', True):       # already (channel, 224, 224)
+                self.load_transforms = []
+            else:
+                self.load_transforms = [EnsureChannelFirstd]    # add a channel to be (1, 224, 224)
+            self.aug_transforms = [
                 RandAffined(
                     keys=load_keys,
                     prob=0.5,
@@ -265,14 +269,21 @@ class FastMRIDataset(data.Dataset):
                 ),
                 CenterSpatialCropd(keys=load_keys, roi_size=(224, 224)),
                 NormalizeIntensityd(keys=norm_keys)
-            ])
+            ]
+
+            self.transforms = Compose(self.load_transforms+self.aug_transforms)
 
         else:
-            self.transforms = Compose([
-                EnsureChannelFirstd(keys=load_keys),
+            if self.config.get('use_2_5d', True):       # already (channel, 224, 224)
+                self.load_transforms = []
+            else:
+                self.load_transforms = [EnsureChannelFirstd]    # add a channel to be (1, 224, 224)
+            
+            self.aug_transforms = [
                 CenterSpatialCropd(keys=load_keys, roi_size=(224, 224)),
                 NormalizeIntensityd(keys=norm_keys)
-            ])
+            ]
+            self.transforms = Compose(self.load_transforms+self.aug_transforms)
 
     #  https://doi.org/10.1371/journal.pmed.1002699.s001 
     def weighted_loss(self, prediction, target):
