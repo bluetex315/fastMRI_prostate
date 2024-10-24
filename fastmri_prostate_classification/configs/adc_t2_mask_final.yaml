@@ -11,7 +11,7 @@ model_args:
       scheduler_plat_auc: False             # True if you want to reduce LR when gains on validation plateau
       warm_up: False                        # Warm
       initial_lr: 0.000001
-      lr: 0.00001                           # typically 1e-03
+      lr: 0.00005                           # typically 1e-03
       momentum: 0.99                        # typically 1e-02
       weight_decay: 0.05                    # 1e-04
       amsgrad: True                         # True to use amsgrad https://www.fast.ai/posts/2018-07-02-adam-weight-decay.html https://openreview.net/forum?id=ryQu7f-RZ
@@ -29,4 +29,4 @@ training:
       max_epochs: 100                      # max_epochs to train for 
       save_model: True                     # Only save model on final set on tuned models
 load_model_epoch: 9
-results_fol: "../../results_t2_paper_split"
+results_fol: "../../results_t2_paper_split_5e-5lr"
