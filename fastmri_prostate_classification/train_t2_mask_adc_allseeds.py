@@ -290,7 +290,10 @@ def train_network(config):
                 lowest_val_loss = current_loss_val
                 if config['training']['save_model']:
                     PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
-                    torch.save(model.state_dict(), PATH)                                                  
+                    best_PATH = os.path.join(config['model_args']['rundir'],  'best' + '.pth')
+                    torch.save(model.state_dict(), PATH)
+                    torch.save(model.state_dict(), best_PATH)     
+                    print(f"best model saved at {best_PATH}")                                                 
         
     writer.close()                                                      
     savepath = os.path.join(dirin, 'model_outputs_raw.pkl')            
