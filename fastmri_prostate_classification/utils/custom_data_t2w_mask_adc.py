@@ -245,7 +245,7 @@ class FastMRIDataset(data.Dataset):
             if self.config.get('use_2_5d', True):       # already (channel, 224, 224)
                 self.load_transforms = []
             else:
-                self.load_transforms = [EnsureChannelFirstd]    # add a channel to be (1, 224, 224)
+                self.load_transforms = [EnsureChannelFirstd(keys=load_keys)]    # add a channel to be (1, 224, 224)
             self.aug_transforms = [
                 RandAffined(
                     keys=load_keys,
@@ -277,7 +277,7 @@ class FastMRIDataset(data.Dataset):
             if self.config.get('use_2_5d', True):       # already (channel, 224, 224)
                 self.load_transforms = []
             else:
-                self.load_transforms = [EnsureChannelFirstd]    # add a channel to be (1, 224, 224)
+                self.load_transforms = [EnsureChannelFirstd(keys=load_keys)]    # add a channel to be (1, 224, 224)
             
             self.aug_transforms = [
                 CenterSpatialCropd(keys=load_keys, roi_size=(224, 224)),
