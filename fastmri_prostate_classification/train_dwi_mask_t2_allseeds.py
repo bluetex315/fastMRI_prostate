@@ -339,8 +339,7 @@ if __name__ == '__main__':
     """
     args_con = get_parser().parse_args() 
 
-    seed_list = [10383, 44820, 238, 3939, 74783, 92938, 143, 2992, 7373, 988]           
-    seed_select =  seed_list[args_con.index_seed]                                      
+    seed_list = [10383, 44820, 238, 3939, 74783, 92938, 143, 2992, 7373, 988]                                                
     
     # Check if a specific seed index is provided
     if args_con.index_seed is not None:

@@ -30,4 +30,4 @@ training:
       max_epochs: 50                       # Small dataset max_epochs probably 30
       save_model: True                     # Only save model on final set on tuned models
 load_model_epoch: 5
-results_fol: "../../results_dwi"
+results_fol: "../../results_dwi_warmup_lr5e-6_rand_split"
