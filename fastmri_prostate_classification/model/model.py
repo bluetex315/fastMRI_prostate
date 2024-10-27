@@ -32,7 +32,7 @@ def ConvNext_model(args, diff=False):
             model.features[0][0] = nn.Conv2d(input_channels, 128, kernel_size=(4, 4), stride=(4, 4))   
 
         if diff:
-            input_channels = 2 + int(args['concat_mask']) + int(args['concat_t2w'])
+            input_channels = 1 + int(args['concat_mask']) + int(args['concat_t2w'])
             if args['use_2_5d']:
                 input_channels = input_channels * 3
             
