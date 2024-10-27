@@ -91,9 +91,9 @@ class FastMRIDataset(data.Dataset):
             if not os.path.exists(path_adc):
                 raise FileNotFoundError(f"ADC image not found: {path_adc}")
                 
-            path_b1500 = os.path.join(pt_folder, f"{pt_id}_b1500.nii.gz")
-            if not os.path.exists(path_b1500):
-                raise FileNotFoundError(f"b1500 image not found: {path_b1500}")
+            # path_b1500 = os.path.join(pt_folder, f"{pt_id}_b1500.nii.gz")
+            # if not os.path.exists(path_b1500):
+            #     raise FileNotFoundError(f"b1500 image not found: {path_b1500}")
 
             path_label = os.path.join(labelpath, f"{pt_id}", f"{pt_id}_ADC_PIRADS.npz")
             if not os.path.exists(path_label):
@@ -115,7 +115,7 @@ class FastMRIDataset(data.Dataset):
 
             data_entry = {
                 "adc": path_adc,
-                "b1500": path_b1500,
+                # "b1500": path_b1500,
                 "label": path_label,
                 "patient_id": pt_id
             }
@@ -147,7 +147,8 @@ class FastMRIDataset(data.Dataset):
             raise ValueError("Invalid split value. Must be 'train', 'val', or 'test'.")
         
         for _, row in split_df.iterrows():
-            temp_dict = {'adc': row['adc'], 'b1500': row['b1500']}
+            # temp_dict = {'adc': row['adc'], 'b1500': row['b1500']}
+            temp_dict = {'adc': row['adc']}
 
             # Conditionally add 't2' only if config requires it
             resample_keys = []
@@ -171,7 +172,7 @@ class FastMRIDataset(data.Dataset):
             
             data = image_loader(temp_dict)
             adc_data = data['adc'][0]
-            b1500_data = data['b1500'][0]
+            # b1500_data = data['b1500'][0]
 
             t2w_data = data.get('t2w', None)
             gland_mask_data = data.get('gland_mask', None)
@@ -218,7 +219,7 @@ class FastMRIDataset(data.Dataset):
             for slice_idx in range(start_idx, end_idx + 1):
                 expanded_data_entry = {
                     "adc": adc_data[:, :, slice_idx],
-                    "b1500": b1500_data[:, :, slice_idx],
+                    # "b1500": b1500_data[:, :, slice_idx],
                     "label": (label_data[slice_idx] > 2).astype(np.int32),
                     "patient_id": row['patient_id'],
                     "slice_idx": slice_idx
@@ -246,7 +247,8 @@ class FastMRIDataset(data.Dataset):
         print("Weights for binary CE:{}".format(self.weights))     
         print("keys for transform", load_keys)
 
-        norm_keys = ['adc', 'b1500']
+        # norm_keys = ['adc', 'b1500']
+        norm_keys = ['adc']
         if 't2w' in load_keys:
             norm_keys.append('t2w')
 
@@ -349,7 +351,7 @@ class FastMRIDataset(data.Dataset):
 
         data_dict = {
             "adc": self.data_df.iloc[index]['adc'], 
-            'b1500': self.data_df.iloc[index]['b1500'],
+            # 'b1500': self.data_df.iloc[index]['b1500'],
             "patient_id": self.data_df.iloc[index]['patient_id'],
             "slice_idx": self.data_df.iloc[index]['slice_idx'],
         }
@@ -369,7 +371,7 @@ class FastMRIDataset(data.Dataset):
 
             # Get slices i-1, i, i+1
             adc_slices = []
-            b1500_slices = []
+            # b1500_slices = []
             t2w_slices = []
             gland_mask_slices = []
 
@@ -385,20 +387,20 @@ class FastMRIDataset(data.Dataset):
                 if len(filtered_df) == 0:
                     # If the neighboring slice does not exist, pad with zeros
                     adc_slice = pad_slice(data_dict['adc'])
-                    b1500_slice = pad_slice(data_dict['b1500'])
+                    # b1500_slice = pad_slice(data_dict['b1500'])
                     t2w_slice = pad_slice(data_dict.get('t2w')) if 't2w' in data_dict else None
                     gland_mask_slice = pad_slice(data_dict.get('gland_mask')) if 'gland_mask' in data_dict else None
 
                 else:
                     # If the neighboring slice exists, get it from the dataframe
                     adc_slice = pad_slice(data_dict['adc'])
-                    b1500_slice = pad_slice(data_dict['b1500'])
+                    # b1500_slice = pad_slice(data_dict['b1500'])
                     t2w_slice = filtered_df.iloc[0]['t2w'] if 't2w' in data_dict else None
                     gland_mask_slice = filtered_df.iloc[0]['gland_mask'] if 'gland_mask' in data_dict else None
 
                 # Collect slices
                 adc_slices.append(adc_slice)
-                b1500_slices.append(b1500_slice)
+                # b1500_slices.append(b1500_slice)
 
                 if t2w_slice is not None:
                     t2w_slices.append(t2w_slice)
@@ -407,10 +409,11 @@ class FastMRIDataset(data.Dataset):
 
             # Stack the slices to create 2.5D input
             adc_2_5d = torch.stack(adc_slices, axis=0)
-            b1500_2_5d = torch.stack(b1500_slices, axis=0)
+            # b1500_2_5d = torch.stack(b1500_slices, axis=0)
 
             # Prepare final multi-channel input
-            final_input = {"adc": adc_2_5d, 'b1500': b1500_2_5d}
+            # final_input = {"adc": adc_2_5d, 'b1500': b1500_2_5d}
+            final_input = {"adc": adc_2_5d}
 
             if self.config.get('concat_t2w', True) and t2w_slices:
                 t2w_2_5d = torch.stack(t2w_slices, axis=0)
@@ -429,8 +432,9 @@ class FastMRIDataset(data.Dataset):
         
         # Prepare the image tensor
         adc = torch.FloatTensor(transformed['adc'])
-        b1500 = torch.FloatTensor(transformed['b1500'])
-        image = torch.cat((adc, b1500), dim=0)
+        # b1500 = torch.FloatTensor(transformed['b1500'])
+        # image = torch.cat((adc, b1500), dim=0)
+        image = adc
 
         # Concatenate adc if it exists in the transformed data
         if self.config.get('concat_t2w', True) and 't2w' in transformed:
