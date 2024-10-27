@@ -366,6 +366,8 @@ if __name__ == '__main__':
             subfolder += '_t2w'
         if args['concat_mask']:
             subfolder += '_mask'
+        if args['use_2_5d']:
+            subfolder += '_use2_5d'
             
         args['model_args']['rundir'] = os.path.join(main_fol, subfolder, args['model_args']['rundir'] + '_SEED_' + str(seed_select))
         print("Model rundir:{}".format(args['model_args']['rundir']))
