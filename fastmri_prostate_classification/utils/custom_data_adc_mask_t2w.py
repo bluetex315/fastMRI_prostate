@@ -91,7 +91,7 @@ class FastMRIDataset(data.Dataset):
             if not os.path.exists(path_adc):
                 raise FileNotFoundError(f"ADC image not found: {path_adc}")
                 
-            path_b1500 = os.path.join(pt_folder, f"{pt_id}_ADC.nii.gz")
+            path_b1500 = os.path.join(pt_folder, f"{pt_id}_b1500.nii.gz")
             if not os.path.exists(path_b1500):
                 raise FileNotFoundError(f"b1500 image not found: {path_b1500}")
 
