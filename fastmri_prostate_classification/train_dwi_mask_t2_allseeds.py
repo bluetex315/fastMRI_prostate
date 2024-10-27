@@ -4,7 +4,7 @@ import os
 import torch
 from sklearn import metrics
 # from utils.load_fastmri_data_convnext_t2 import load_data
-from utils.custom_data_t2w_mask_adc import load_data
+from utils.custom_data_adc_mask_t2w import load_data
 from model.model import ConvNext_model
 from utils.pytorchtools import EarlyStopping
 from model.extra_model_utils import get_optim_sched, get_lr
@@ -16,6 +16,22 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import monai
 import nibabel as nib
+
+
+def save_images(inputs, save_dir, prefix):
+    os.makedirs(save_dir, exist_ok=True)
+    for i in range(4):
+        metadata = inputs[i].meta if isinstance(inputs[i], monai.data.MetaTensor) else None
+        # print(metadata)
+        img = inputs[i].cpu().numpy()
+        for c in range(img.shape[0]):  # Iterate over each channel
+            nifti_img = nib.Nifti1Image(img[c], affine=np.eye(4))
+            # if metadata is not None:
+            #     nifti_img.header.extensions.append(('metadata', str(metadata)))
+            #     print("success")
+            nib.save(nifti_img, os.path.join(save_dir, f'{prefix}_image_{i}_channel_{c}.nii.gz'))
+            print("save success at", os.path.join(save_dir, f'{prefix}_image_{i}_channel_{c}.nii.gz'))
+
 
 def train(model, optimizer, scheduler, train_loader, device):
     """
@@ -38,12 +54,17 @@ def train(model, optimizer, scheduler, train_loader, device):
     """
 
     total_loss_train, total_num, all_out, all_labels = 0.0, 0,  [], []  
-    for _, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), torch.flatten(target.to(device))  
-        optimizer.zero_grad()                                            
-        out = model(data)                                                
 
-        out = torch.flatten(out)                                      
+    train_loader_tqdm = tqdm(train_loader, desc="Training", unit="batch")
+
+    for _, (image, target) in enumerate(train_loader_tqdm):
+        image = image.to(device)
+        target = torch.flatten(target.to(device)) 
+
+        optimizer.zero_grad()                                            
+        out = model(image)                                                
+        out = torch.flatten(out)     
+
         loss = train_loader.dataset.weighted_loss(out, target)          
         loss.backward()                                                
         optimizer.step()                                               
@@ -55,14 +76,22 @@ def train(model, optimizer, scheduler, train_loader, device):
 
     all_labels_npy = torch.cat(all_labels).detach().cpu().numpy().astype(np.int32)   
     all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()         
+    # Convert raw predictions to binary predictions
+    binary_preds_npy = (all_preds_npy > 0.5).astype(int)
 
     auc = metrics.roc_auc_score(all_labels_npy, all_preds_npy)                      
     
+    accuracy = metrics.accuracy_score(all_labels_npy, binary_preds_npy)
+    recall = metrics.recall_score(all_labels_npy, binary_preds_npy)
+    f1 = metrics.f1_score(all_labels_npy, binary_preds_npy)
+
+    conf_matrix = metrics.confusion_matrix(all_labels_npy, binary_preds_npy)
+
     current_loss = total_loss_train/total_num                           
     current_lr = get_lr(optimizer)                                        
     scheduler.step()                                                      
 
-    return auc, current_lr, current_loss, torch.cat(all_labels), torch.cat(all_out)
+    return auc, current_lr, current_loss, accuracy, recall, f1, conf_matrix, torch.cat(all_labels), torch.cat(all_out)
 
 def val(model, val_loader, device):
     """
@@ -81,12 +110,16 @@ def val(model, val_loader, device):
     - raw_preds_validation (Tensor): Concatenated raw predictions from the validation set.
     """
     total_loss_val, total_num_val, all_out, all_labels_val = 0.0, 0,  [], []  
-    model.eval()                                                             
-    with torch.no_grad():                                                    
-        for _, (data, target) in enumerate(val_loader):
-            data, target = data.to(device), torch.flatten(target.to(device))  
-            out = model(data)                                                
+    model.eval()   
 
+    val_loader_tqdm = tqdm(val_loader, desc="Validating", unit="batch")  
+        
+    with torch.no_grad():                                                    
+        for _, (image, target) in enumerate(val_loader_tqdm):
+            image = image.to(device)
+            # print(image.shape)
+            target = torch.flatten(target.to(device)) 
+            out = model(image)                                                
             out = torch.flatten(out)                                          
             loss = val_loader.dataset.weighted_loss(out, target)              
             
@@ -97,11 +130,20 @@ def val(model, val_loader, device):
 
     all_labels_npy = torch.cat(all_labels_val).detach().cpu().numpy().astype(np.int32) 
     all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()           
+    binary_preds_npy = (all_preds_npy > 0.5).astype(int)
 
-    auc_val = metrics.roc_auc_score(all_labels_npy, all_preds_npy)                     
+    auc_val = metrics.roc_auc_score(all_labels_npy, all_preds_npy)  
+
+    accuracy = metrics.accuracy_score(all_labels_npy, binary_preds_npy)
+    recall = metrics.recall_score(all_labels_npy, binary_preds_npy)
+    f1 = metrics.f1_score(all_labels_npy, binary_preds_npy)
+    
+    conf_matrix = metrics.confusion_matrix(all_labels_npy, binary_preds_npy)
+
     current_loss = total_loss_val/total_num_val                                         
         
-    return auc_val, current_loss, torch.cat(all_labels_val), torch.cat(all_out)
+    return auc_val, current_loss, accuracy, recall, f1, conf_matrix, torch.cat(all_labels_val), torch.cat(all_out)
+
 
 def train_network(config):
     """
@@ -115,22 +157,53 @@ def train_network(config):
     device = torch.device("cuda" if use_cuda else "cpu")                
     print('Found this device:{}'.format(device))
     
-    train_loader, valid_loader, test_loader = load_data(config['data']['datasheet'],  config["data"]["data_location"], int(config['data']['norm_type']), config['training']['augment'], config['training']['saveims'], config['model_args']['rundir'])
+    train_loader, valid_loader, test_loader = load_data(
+        config,
+        config['data']['datapath'], 
+        config["data"]["labelpath"],
+        config["data"]["glandmask_path"], 
+        int(config['data']['norm_type']),  
+        config['training']['augment'], 
+        config['training']['saveims'], 
+        config['model_args']['rundir']
+    )
+
     print('Lengths: Train:{}, Val:{}, Test:{}'.format(len(train_loader), len(valid_loader), len(test_loader)))  
     
-    model = ConvNext_model(config, diff = True)
+    model = ConvNext_model(config, diff=True)
     model.to(device)
     print('Number of model parameters:{}'.format(sum(p.numel() for p in model.parameters())))
-    optimizer, scheduler, scheduler2 = get_optim_sched(model, config) 
+    if config['model_args']['warm_up']:
+        optimizer, scheduler, warmup_scheduler, scheduler2 = get_optim_sched(model, config) 
+    else:
+        optimizer, scheduler, scheduler2 = get_optim_sched(model, config) 
 
     dirin = config['model_args']['rundir']
     writer = SummaryWriter(log_dir = config['model_args']['rundir'])  
     
-    saver = dict()                                      
+    saver = dict()    
+    lowest_val_loss = float('inf')
+    lowest_val_epoch = -1   
+    lowest_val_losses = []
+
     for e in range(config['training']['max_epochs']):  
+
+        if config['training'].get('saveims', True) and e == 0:
+            save_dir = os.path.join(config['model_args']['rundir'], 'saved_images_epoch_{}'.format(e))
+
+            # Save the first 4 training images before and after transform as NIfTI files
+            inputs_train, labels_train = next(iter(train_loader))
+            print(inputs_train.shape, type(inputs_train))
+            save_images(inputs_train, save_dir, 'inputs_train')
+
+            # Save the first 4 validation images before and after transform as NIfTI files
+            inputs_val, labels_val = next(iter(valid_loader))
+            print(inputs_val.shape, type(inputs_val))
+            save_images(inputs_val, save_dir, 'inputs_val')
+            
         model.train()                                 
-        AUC_train, current_LR, current_loss_train, labels_train, raw_preds_train  = train(model, optimizer, scheduler, train_loader, device)       
-        AUC_val, current_loss_val, labels_validation, raw_preds_validation  = val(model, valid_loader, device)     
+        AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, device)       
+        AUC_val, current_loss_val, acc_val, recall_val, f1_val, conf_matrix_val, labels_validation, raw_preds_validation  = val(model, valid_loader, device)     
 
         early_stopping(current_loss_val, model)       
         
@@ -143,7 +216,14 @@ def train_network(config):
             scheduler2.step(AUC_val)
         else:
             pass    
-        scheduler.step()
+        
+        if config['model_args']['warm_up']:
+            if e < config['model_args']['warmup_epochs']:
+                warmup_scheduler.step()
+            else:
+                scheduler.step()
+        else:
+            scheduler.step()
 
         writer.add_scalar("Loss/Train", current_loss_train, e)    
         writer.add_scalar("Loss/Validation", current_loss_val, e)  
@@ -151,8 +231,20 @@ def train_network(config):
         writer.add_scalar("AUC/Validation", AUC_val, e)            
         writer.add_scalar("Learning Rate", current_LR, e)          
         
-        print('Current epoch: {}, Train_loss:{:.3f}, Validation_loss:{:.3f}, Train_AUC:{:.3f}, Validation_AUC:{:.3f}, LR:{}'.format(e, current_loss_train, current_loss_val, AUC_train, AUC_val,current_LR))
-        
+        print('Current epoch: {}, '
+            'Train_loss: {:.3f}, '
+            'Val_loss: {:.3f}, \n'
+            'Train_ACC: {:.3f}, '
+            'Val_ACC: {:.3f}, '
+            'Train_AUC: {:.3f}, '
+            'Val_AUC: {:.3f}, '
+            'Train_Recall: {:.3f}, '
+            'Val_Recall: {:.3f}, '
+            'LR: {}'.format(e, current_loss_train, current_loss_val, acc_train, acc_val, AUC_train, AUC_val, recall_train, recall_val, current_LR))
+
+        print(f"Confusion Matrix (Train):\n{conf_matrix_train}")
+        print(f"Confusion Matrix (Val):\n{conf_matrix_val}")
+
         saver[e] = dict()
         saver[e]['val_preds'] = raw_preds_validation
         saver[e]['val_labels'] = labels_validation
@@ -162,16 +254,66 @@ def train_network(config):
         saver[e]['train_labels'] = labels_train
         saver[e]['train_auc'] = AUC_train
         saver[e]['train_loss'] = current_loss_train
+        
+        # Check if we should update the list of lowest losses
+        if len(lowest_val_losses) < 5 or current_loss_val < lowest_val_losses[-1][0]:
+            # If we already have 5 checkpoints, remove the highest loss checkpoint
+            if len(lowest_val_losses) == 5:
+                _, epoch_to_remove = lowest_val_losses[-1]
+                # Remove the corresponding model checkpoint file
+                checkpoint_to_remove = os.path.join(config['model_args']['rundir'], f'model_epoch_{epoch_to_remove}.pth')
+                if os.path.exists(checkpoint_to_remove):
+                    os.remove(checkpoint_to_remove)
+                # Remove the highest loss from the list
+                lowest_val_losses.pop()
 
+            # Add the current loss and epoch to the list
+            lowest_val_losses.append((current_loss_val, e))
+            # Sort the list in ascending order of loss to keep the lowest losses at the beginning
+            lowest_val_losses = sorted(lowest_val_losses, key=lambda x: x[0])
 
-        if config['training']['save_model']:
-            PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
-            torch.save(model.state_dict(), PATH)                                                  
-    
+            if config['training']['save_ROC_AUC']:
+                fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
+                roc_auc = metrics.auc(fpr, tpr)
+
+                plt.figure()
+                plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+                plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title('Receiver Operating Characteristic (ROC)')
+                plt.legend(loc='lower right')
+                save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
+                plt.savefig(save_path)
+                print("figure saved at epoch", e)
+                plt.close()
+
+            if current_loss_val < lowest_val_loss:
+                lowest_val_loss = current_loss_val
+                if config['training']['save_model']:
+                    PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
+                    best_PATH = os.path.join(config['model_args']['rundir'],  'best' + '.pth') 
+      
+                    torch.save(model.state_dict(), PATH)
+                    torch.save(model.state_dict(), best_PATH)     
+                    print(f"best model saved at {best_PATH}")                                           
+        
     writer.close()                                                      
     savepath = os.path.join(dirin, 'model_outputs_raw.pkl')            
     with open(savepath, 'wb') as f:                                   
         pickle.dump(saver, f)
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 def get_parser():
     """
@@ -226,7 +368,7 @@ if __name__ == '__main__':
         if args['concat_mask']:
             subfolder += '_mask'
             
-        args['model_args']['rundir'] = os.path.join(main_fol, args['model_args']['rundir'] + '_SEED_' + str(seed_select)) 
+        args['model_args']['rundir'] = os.path.join(main_fol, subfolder, args['model_args']['rundir'] + '_SEED_' + str(seed_select))
         print("Model rundir:{}".format(args['model_args']['rundir']))
         if not os.path.isdir(args['model_args']["rundir"]):
             os.makedirs(os.path.join(args['model_args']["rundir"]))                                   
@@ -238,7 +380,7 @@ if __name__ == '__main__':
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         np.random.seed(seed_select)
-
+        print(args)
         train_network(args)
 
 

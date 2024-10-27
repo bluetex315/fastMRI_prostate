@@ -24,15 +24,19 @@ def ConvNext_model(args, diff=False):
         weights_cn = ConvNeXt_Base_Weights.DEFAULT                                  
         model = convnext_base(weights=weights_cn)  
 
-        input_channels = 1 + int(args['concat_mask']) + int(args['concat_adc'])
-
-        if args['use_2_5d']:
-            input_channels = input_channels * 3
-        
-        model.features[0][0] = nn.Conv2d(input_channels, 128, kernel_size=(4, 4), stride=(4, 4))   
+        if not diff:
+            input_channels = 1 + int(args['concat_mask']) + int(args['concat_adc'])
+            if args['use_2_5d']:
+                input_channels = input_channels * 3
+            
+            model.features[0][0] = nn.Conv2d(input_channels, 128, kernel_size=(4, 4), stride=(4, 4))   
 
         if diff:
-            model.features[0][0] = nn.Conv2d(2, 128, kernel_size=(4, 4), stride=(4, 4))  
+            input_channels = 2 + int(args['concat_mask']) + int(args['concat_t2w'])
+            if args['use_2_5d']:
+                input_channels = input_channels * 3
+            
+            model.features[0][0] = nn.Conv2d(input_channels, 128, kernel_size=(4, 4), stride=(4, 4))
          
         model.classifier[2] = nn.Linear(in_features=1024, out_features=1, bias=True)  
 

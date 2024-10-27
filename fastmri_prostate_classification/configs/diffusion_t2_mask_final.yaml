@@ -9,9 +9,10 @@ model_args:
       lr_decay_steps: [4, 10, 20, 30]            # what epoch nums do we want to reduce LR at [10, 20, 40] etc
       scheduler_plat_loss: True             # True if you want to reduce LR when gains on validation plateau
       scheduler_plat_auc: False             # True if you want to reduce LR when gains on validation plateau
-      warm_up: False                        # Warm
+      warm_up: True                         # Warm
+      warmup_epochs: 5
       initial_lr: 0.000001
-      lr: 0.00001                           # typically 1e-03
+      lr: 0.000005                           # typically 1e-03
       momentum: 0.99                        # typically 1e-02
       weight_decay: 0.05                    # 1e-04
       amsgrad: True                         # True to use amsgrad https://www.fast.ai/posts/2018-07-02-adam-weight-decay.html https://openreview.net/forum?id=ryQu7f-RZ
@@ -25,6 +26,7 @@ data:
 training:
       augment: True                        # True if augmenatation is being done 
       saveims: True                      # Recommend True to check on status of training images especially if augment
+      save_ROC_AUC: True              
       max_epochs: 50                       # Small dataset max_epochs probably 30
       save_model: True                     # Only save model on final set on tuned models
 load_model_epoch: 5

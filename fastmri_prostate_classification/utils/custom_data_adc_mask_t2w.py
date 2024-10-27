@@ -95,14 +95,14 @@ class FastMRIDataset(data.Dataset):
             if not os.path.exists(path_b1500):
                 raise FileNotFoundError(f"b1500 image not found: {path_b1500}")
 
-            path_label = os.path.join(labelpath, f"{pt_id}", f"{pt_id}_T2W_PIRADS.npz")
+            path_label = os.path.join(labelpath, f"{pt_id}", f"{pt_id}_ADC_PIRADS.npz")
             if not os.path.exists(path_label):
                 raise FileNotFoundError(f"Label file not found: {path_label}")
 
             # Load T2W path only if config['concat_t2w'] is True
-            path_t2 = None
+            path_t2w = None
             if self.config['concat_t2w']:
-                path_adc = os.path.join(pt_folder, f"{pt_id}_T2W.nii.gz")
+                path_t2w = os.path.join(pt_folder, f"{pt_id}_T2W.nii.gz")
                 if not os.path.exists(path_t2w):
                     raise FileNotFoundError(f"T2 image not found: {path_t2w}")
 
@@ -121,7 +121,7 @@ class FastMRIDataset(data.Dataset):
             }
 
             # Conditionally add paths if they exist and are required by the configuration
-            if path_t2 and os.path.exists(path_t2w):
+            if path_t2w and os.path.exists(path_t2w):
                 data_entry["t2w"] = path_t2w
             if path_gland_mask and os.path.exists(path_gland_mask):
                 data_entry["gland_mask"] = path_gland_mask
@@ -157,7 +157,7 @@ class FastMRIDataset(data.Dataset):
             # Conditionally add 'gland_mask' only if config requires it
             if self.config['concat_mask']:
                 temp_dict['gland_mask'] = row['gland_mask']
-                resamnple_keys.append('gland_mask')
+                resample_keys.append('gland_mask')
 
             load_keys = list(temp_dict.keys())
             # resampling t2/mask into adc space
@@ -349,6 +349,7 @@ class FastMRIDataset(data.Dataset):
 
         data_dict = {
             "adc": self.data_df.iloc[index]['adc'], 
+            'b1500': self.data_df.iloc[index]['b1500'],
             "patient_id": self.data_df.iloc[index]['patient_id'],
             "slice_idx": self.data_df.iloc[index]['slice_idx'],
         }
