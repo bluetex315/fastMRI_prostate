@@ -184,7 +184,7 @@ class FastMRIDataset(data.Dataset):
             label_data = np.load(row['label'])['pirads'][::-1]
 
             start_idx = 0
-            end_idx = t2w_data.shape[2] - 1
+            end_idx = adc_data.shape[2] - 1
 
             if gland_mask_data is not None:
                 if adc_data.shape != gland_mask_data.shape:
