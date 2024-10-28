@@ -3,7 +3,7 @@ import numpy as np
 import os
 import torch
 from sklearn import metrics
-from utils.custom_adc_mask_t2w import load_data
+from utils.custom_data_adc_mask_t2w import load_data
 from model.model import ConvNext_model
 import yaml
 import matplotlib.pyplot as plt
