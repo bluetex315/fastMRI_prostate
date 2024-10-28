@@ -154,7 +154,7 @@ def get_parser():
     parser.add_argument('--config_file_dwi', type=str, required=True)           # config file which has all the training inputs
     # parser.add_argument('--config_file_diff', type=str, required=True)         # config file which has all the training inputs
     parser.add_argument('--index_seed', type=int)                               # Optional: Seed number for reproducibility for all numpy, random, torch
-    parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
+    parser.add_argument('--concat_t2w', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
     parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     parser.add_argument('--focal_loss', type=str2bool, default=False, help='whether to use focal loss instead of weighted bce')
     parser.add_argument('--use_2_5d', type=str2bool, required=True, help='Set to True or False to specify whether to use 2.5D.')
@@ -187,7 +187,7 @@ if __name__ == '__main__':
 
         args_dwi['seed'] = seed_select
         args_dwi['concat_mask'] = args_con.concat_mask
-        args_dwi['concat_adc'] = args_con.concat_adc
+        args_dwi['concat_t2w'] = args_con.concat_t2w
         args_dwi['focal_loss'] = args_con.focal_loss
         args_dwi['use_2_5d'] = args_con.use_2_5d
         print(args_dwi)
