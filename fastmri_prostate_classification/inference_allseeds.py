@@ -3,9 +3,7 @@ import numpy as np
 import os
 import torch
 from sklearn import metrics
-# from utils.load_fastmri_data_convnext_diff import load_data as load_data_diff
-# from utils.load_fastmri_data_convnext_t2 import load_data as load_data_t2
-from utils.custom_data_t2w_mask_adc import load_data
+from utils.custom_adc_mask_t2w import load_data
 from model.model import ConvNext_model
 import yaml
 import matplotlib.pyplot as plt
@@ -43,7 +41,7 @@ def test(model, test_loader, device):
         
     return auc_test, all_preds_npy, all_labels_npy
 
-def run_inference(config_t2):
+def run_inference(config_dwi):
     """
     Run an inference session on the trained ConvNext network
 
@@ -55,21 +53,21 @@ def run_inference(config_t2):
     print('Found this device:{}'.format(device))
     
     # _, _, test_loader_diff = load_data_diff(config_diff['data']['datasheet'],  config_diff["data"]["data_location"], int(config_diff['data']['norm_type']),  config_diff['training']['augment'], config_diff['training']['saveims'], config_diff['model_args']['rundir'])
-    _, _, test_loader_t2 = load_data(
-        config_t2,
-        config_t2['data']['datapath'], 
-        config_t2["data"]["labelpath"],
-        config_t2["data"]["glandmask_path"], 
-        int(config_t2['data']['norm_type']),  
-        config_t2['training']['augment'], 
-        config_t2['training']['saveims'], 
-        config_t2['model_args']['rundir']
+    _, _, test_loader_dwi = load_data(
+        config_dwi,
+        config_dwi['data']['datapath'], 
+        config_dwi["data"]["labelpath"],
+        config_dwi["data"]["glandmask_path"], 
+        int(config_dwi['data']['norm_type']),  
+        config_dwi['training']['augment'], 
+        config_dwi['training']['saveims'], 
+        config_dwi['model_args']['rundir']
     )
 
     # _, _, test_loader_t2 = load_data_t2(config_t2['data']['datasheet'], config_t2["data"]["data_location"],  int(config_t2['data']['norm_type']),  config_t2['training']['augment'], config_t2['training']['saveims'], config_t2['model_args']['rundir'])
 
     # print('Lengths diffusion:Test:{}'.format(len(test_loader_diff)))  
-    print('Lengths T2:Test:{}'.format(len(test_loader_t2)))  
+    print('Lengths DWI: Test:{}'.format(len(test_loader_dwi)))  
 
 
     # model_diff = ConvNext_model(config_diff, diff = True)
@@ -79,51 +77,51 @@ def run_inference(config_t2):
     # model_diff.load_state_dict(torch.load(model_path_diff))
     # model_diff.to(device)
 
-    model_t2 = ConvNext_model(config_t2)
-    model_path_t2 = os.path.join(config_t2['model_args']['rundir'], 'best.pth')
-    print("Loading model:{}".format(model_path_t2))
-    model_t2.load_state_dict(torch.load(model_path_t2))
-    model_t2.to(device)
+    model_dwi = ConvNext_model(config_dwi, diff=True)
+    model_path_dwi = os.path.join(config_dwi['model_args']['rundir'], 'best.pth')
+    print("Loading model:{}".format(model_path_dwi))
+    model_dwi.load_state_dict(torch.load(model_path_dwi))
+    model_dwi.to(device)
 
     # Assuming `labels_t2` are the true labels and `raw_preds_test_t2` are the predicted probabilities:
     # Convert predicted probabilities to binary predictions (0 or 1) using a threshold (e.g., 0.5)
 
     # AUC_test_diff, raw_preds_test_diff, labels_diff  = test(model_diff, test_loader_diff, device)    
-    AUC_test_t2, raw_preds_test_t2, labels_t2  = test(model_t2, test_loader_t2, device)    
-    fpr_t2, tpr_t2, thresholds = metrics.roc_curve(labels_t2, raw_preds_test_t2)
+    AUC_test_dwi, raw_preds_test_dwi, labels_dwi = test(model_dwi, test_loader_dwi, device)    
+    fpr_dwi, tpr_dwi, thresholds = metrics.roc_curve(labels_dwi, raw_preds_test_dwi)
 
     # Calculate Youden's J statistic
-    j_scores = tpr_t2 - fpr_t2
+    j_scores = tpr_dwi - fpr_dwi
     best_index = np.argmax(j_scores)
     best_threshold = thresholds[best_index]
 
     print(f"Best threshold (Youden's J): {best_threshold}")
 
-    binary_preds_t2 = (raw_preds_test_t2 >= best_threshold).astype(int)
+    binary_preds_dwi = (raw_preds_test_dwi >= 0.5).astype(int)
 
     # Calculate Precision, Recall, Accuracy, F1 Score, and Confusion Matrix
-    precision_t2 = metrics.precision_score(labels_t2, binary_preds_t2)
-    recall_t2 = metrics.recall_score(labels_t2, binary_preds_t2)
-    accuracy_t2 = metrics.accuracy_score(labels_t2, binary_preds_t2)
-    f1_t2 = metrics.f1_score(labels_t2, binary_preds_t2)
-    confusion_matrix_t2 = metrics.confusion_matrix(labels_t2, binary_preds_t2)
+    precision_dwi = metrics.precision_score(labels_dwi, binary_preds_dwi)
+    recall_dwi = metrics.recall_score(labels_dwi, binary_preds_dwi)
+    accuracy_dwi = metrics.accuracy_score(labels_dwi, binary_preds_dwi)
+    f1_dwi = metrics.f1_score(labels_dwi, binary_preds_dwi)
+    confusion_matrix_dwi = metrics.confusion_matrix(labels_dwi, binary_preds_dwi)
 
     # Print the results
-    print(f"Test AUC - T2 is: {AUC_test_t2:.3f}")
-    print(f"Precision - T2: {precision_t2:.3f}")
-    print(f"Recall - T2: {recall_t2:.3f}")
-    print(f"Accuracy - T2: {accuracy_t2:.3f}")
-    print(f"F1 Score - T2: {f1_t2:.3f}")
-    print(f"Confusion Matrix - T2:\n{confusion_matrix_t2}")
+    print(f"Test AUC - DWI is: {AUC_test_dwi:.3f}")
+    print(f"Precision - DWI: {precision_dwi:.3f}")
+    print(f"Recall - DWI: {recall_dwi:.3f}")
+    print(f"Accuracy - DWI: {accuracy_dwi:.3f}")
+    print(f"F1 Score - DWI {f1_dwi:.3f}")
+    print(f"Confusion Matrix - DWI:\n{confusion_matrix_dwi}")
 
     # print("Test AUC - diffusion is:{:.3f}".format(AUC_test_diff))
     
     # fpr_diff, tpr_diff, _ = metrics.roc_curve(labels_diff, raw_preds_test_diff)
-    fpr_t2, tpr_t2, _ = metrics.roc_curve(labels_t2, raw_preds_test_t2)
+    fpr_dwi, tpr_dwi, _ = metrics.roc_curve(labels_dwi, raw_preds_test_dwi)
 
     plt.title('Receiver Operating Characteristic')
     # plt.plot(fpr_diff, tpr_diff, 'b', label = 'AUC diff = %0.2f' % AUC_test_diff, c= 'red')
-    plt.plot(fpr_t2, tpr_t2, 'b', label = 'AUC T2= %0.2f' % AUC_test_t2, c= 'blue')
+    plt.plot(fpr_dwi, tpr_dwi, 'b', label = 'AUC DWI= %0.2f' % AUC_test_dwi, c= 'blue')
     plt.legend(loc = 'lower right')
     plt.plot([0, 1], [0, 1],'r--')
     plt.xlim([0, 1.02])
@@ -131,7 +129,7 @@ def run_inference(config_t2):
     plt.ylabel('True Positive Rate')
     plt.xlabel('False Positive Rate')
     
-    save_png_file = os.path.join(config_t2['model_args']['rundir'], "Test_ROC_Curve_fastMRI_prostate.png")
+    save_png_file = os.path.join(config_dwi['model_args']['rundir'], "Test_ROC_Curve_fastMRI_prostate.png")
     plt.savefig(save_png_file, bbox_inches = "tight")
 
 def str2bool(v):
@@ -153,7 +151,7 @@ def get_parser():
     - parser: The argparse.ArgumentParser.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config_file_t2', type=str, required=True)           # config file which has all the training inputs
+    parser.add_argument('--config_file_dwi', type=str, required=True)           # config file which has all the training inputs
     # parser.add_argument('--config_file_diff', type=str, required=True)         # config file which has all the training inputs
     parser.add_argument('--index_seed', type=int)                               # Optional: Seed number for reproducibility for all numpy, random, torch
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
@@ -181,30 +179,30 @@ if __name__ == '__main__':
     # Loop through all seeds
     for seed_select in seed_list:
         # Load config file
-        with open(args_con.config_file_t2) as f:
-            args_t2 = yaml.load(f, Loader=yaml.UnsafeLoader)  
+        with open(args_con.config_file_dwi) as f:
+            args_dwi = yaml.load(f, Loader=yaml.UnsafeLoader)  
 
         # with open(args_con.config_file_diff) as f:
         #     args_diff = yaml.load(f, Loader=yaml.UnsafeLoader)  
 
-        args_t2['seed'] = seed_select
-        args_t2['concat_mask'] = args_con.concat_mask
-        args_t2['concat_adc'] = args_con.concat_adc
-        args_t2['focal_loss'] = args_con.focal_loss
-        args_t2['use_2_5d'] = args_con.use_2_5d
-        print(args_t2)
+        args_dwi['seed'] = seed_select
+        args_dwi['concat_mask'] = args_con.concat_mask
+        args_dwi['concat_adc'] = args_con.concat_adc
+        args_dwi['focal_loss'] = args_con.focal_loss
+        args_dwi['use_2_5d'] = args_con.use_2_5d
+        print(args_dwi)
 
-        main_fol_t2 = args_t2["results_fol"]
+        main_fol_dwi = args_dwi["results_fol"]
         # main_fol_dwi = args_diff["results_fol"]
-        subfolder = 't2w'  # Always include 't2w' as it's the base modality
+        subfolder = 'dwi'  # Always include 't2w' as it's the base modality
 
-        if args_t2['concat_adc']:
-            subfolder += '_adc'
-        if args_t2['concat_mask']:
+        if args_dwi['concat_t2w']:
+            subfolder += '_t2w'
+        if args_dwi['concat_mask']:
             subfolder += '_mask'
 
-        args_t2['model_args']['rundir'] = os.path.join(main_fol_t2, subfolder, args_t2['model_args']['rundir'] + '_SEED_' + str(seed_select))
-        print("Model rundir T2:{}".format(args_t2['model_args']['rundir']))
+        args_dwi['model_args']['rundir'] = os.path.join(main_fol_dwi, subfolder, args_dwi['model_args']['rundir'] + '_SEED_' + str(seed_select))
+        print("Model rundir DWI:{}".format(args_dwi['model_args']['rundir']))
         # args_diff['model_args']['rundir'] = os.path.join(main_fol_dwi, args_diff['model_args']['rundir'] + '_SEED_' + str(seed_select)) 
 
         # print("Model rundir diffusion:{}".format(args_diff['model_args']['rundir']))   
@@ -215,6 +213,6 @@ if __name__ == '__main__':
         torch.backends.cudnn.benchmark = False
         np.random.seed(seed_select)
 
-        run_inference(args_t2)
+        run_inference(args_dwi)
 
 # %%
