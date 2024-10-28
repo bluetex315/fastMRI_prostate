@@ -130,6 +130,7 @@ def run_inference(config_dwi):
     plt.xlabel('False Positive Rate')
     
     save_png_file = os.path.join(config_dwi['model_args']['rundir'], "Test_ROC_Curve_fastMRI_prostate.png")
+    print("figure saved at", save_png_file)
     plt.savefig(save_png_file, bbox_inches = "tight")
 
 def str2bool(v):
@@ -194,12 +195,16 @@ if __name__ == '__main__':
 
         main_fol_dwi = args_dwi["results_fol"]
         # main_fol_dwi = args_diff["results_fol"]
-        subfolder = 'dwi'  # Always include 't2w' as it's the base modality
+        subfolder = 'adc'  # Always include 't2w' as it's the base modality
 
         if args_dwi['concat_t2w']:
             subfolder += '_t2w'
+
         if args_dwi['concat_mask']:
             subfolder += '_mask'
+
+        if args_dwi['use_2_5d']:
+            subfolder += '_use_2_5d'
 
         args_dwi['model_args']['rundir'] = os.path.join(main_fol_dwi, subfolder, args_dwi['model_args']['rundir'] + '_SEED_' + str(seed_select))
         print("Model rundir DWI:{}".format(args_dwi['model_args']['rundir']))
