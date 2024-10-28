@@ -204,7 +204,7 @@ if __name__ == '__main__':
             subfolder += '_mask'
 
         if args_dwi['use_2_5d']:
-            subfolder += '_use_2_5d'
+            subfolder += '_use2_5d'
 
         args_dwi['model_args']['rundir'] = os.path.join(main_fol_dwi, subfolder, args_dwi['model_args']['rundir'] + '_SEED_' + str(seed_select))
         print("Model rundir DWI:{}".format(args_dwi['model_args']['rundir']))
