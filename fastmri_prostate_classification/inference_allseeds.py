@@ -109,7 +109,7 @@ def run_inference(config_t2):
     youden_best_threshold = thresholds[best_index]
 
     # Calculate the Euclidean distance to (0,1) for each point on the ROC curve
-    distances = np.sqrt((fpr)**2 + (1 - tpr)**2)
+    distances = np.sqrt((fpr_t2)**2 + (1 - tpr_t2)**2)
     optimal_idx = np.argmin(distances)
     optimal_threshold_euclidean = thresholds[optimal_idx]
 
