@@ -107,13 +107,11 @@ def run_inference(config_t2):
     j_scores = tpr_t2 - fpr_t2
     best_index = np.argmax(j_scores)
     youden_best_threshold = thresholds[best_index]
-    print(f"Best threshold (Youden's J): {youden_best_threshold}")
 
     # Calculate the Euclidean distance to (0,1) for each point on the ROC curve
     distances = np.sqrt((fpr)**2 + (1 - tpr)**2)
     optimal_idx = np.argmin(distances)
     optimal_threshold_euclidean = thresholds[optimal_idx]
-    print(f"Best Threshold (Min Distance to (0,1)): {optimal_threshold_euclidean}")
 
     binary_preds_t2_youden = (raw_preds_test_t2 >= youden_best_threshold).astype(int)
     binary_preds_t2_min_euclidean = (raw_preds_test_t2 >= optimal_threshold_euclidean).astype(int)
@@ -122,6 +120,8 @@ def run_inference(config_t2):
     # Calculate Precision, Recall, Accuracy, F1 Score, and Confusion Matrix
     precision_t2, recall_t2, accuracy_t2, f1_t2, confusion_matrix_t2 = calculate_metrics(labels_t2, binary_preds_t2_youden)
     # Print the results
+    print("Using Youden's threshold")
+    print(f"Best threshold (Youden's J): {youden_best_threshold}")
     print(f"Test AUC - T2 is: {AUC_test_t2:.3f}")
     print(f"Precision - T2: {precision_t2:.3f}")
     print(f"Recall - T2: {recall_t2:.3f}")
@@ -131,6 +131,8 @@ def run_inference(config_t2):
 
     precision_t2, recall_t2, accuracy_t2, f1_t2, confusion_matrix_t2 = calculate_metrics(labels_t2, binary_preds_t2_min_euclidean)
     # Print the results
+    print("Using minimum euclidean distrance threshold")
+    print(f"Best Threshold (Min Distance to (0,1)): {optimal_threshold_euclidean}")
     print(f"Test AUC - T2 is: {AUC_test_t2:.3f}")
     print(f"Precision - T2: {precision_t2:.3f}")
     print(f"Recall - T2: {recall_t2:.3f}")
@@ -140,6 +142,7 @@ def run_inference(config_t2):
 
     precision_t2, recall_t2, accuracy_t2, f1_t2, confusion_matrix_t2 = calculate_metrics(labels_t2, binary_preds_t2_50)
     # Print the results
+    print("Using 0.5 as threshold")
     print(f"Test AUC - T2 is: {AUC_test_t2:.3f}")
     print(f"Precision - T2: {precision_t2:.3f}")
     print(f"Recall - T2: {recall_t2:.3f}")
