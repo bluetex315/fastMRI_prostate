@@ -420,8 +420,12 @@ class FastMRIDataset(data.Dataset):
 
         # Convert label to tensor
         label = torch.FloatTensor([label])
-
-        return image, label
+        if self.split == 'train':
+            return image, label
+        elif self.split == 'val':
+            return image, label
+        else:
+            return image, label, data_dict['patient_id'], data_dict['slice_idx']
 
     def __len__(self):
         return len(self.data_df)

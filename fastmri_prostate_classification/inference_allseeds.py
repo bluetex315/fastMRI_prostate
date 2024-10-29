@@ -9,6 +9,7 @@ from utils.custom_data_t2w_mask_adc import load_data
 from model.model import ConvNext_model
 import yaml
 import matplotlib.pyplot as plt
+import pandas as pd
 
 def calculate_metrics(labels, binary_preds):
 
@@ -35,24 +36,30 @@ def test(model, test_loader, device):
     - raw_preds_test (Tensor): Concatenated raw predictions from the test set.
     """
     total_num_test, all_out, all_labels_test = 0,  [], [] 
+    all_patient_id, all_slice_idx = [], []
     model.eval()                                                             
     with torch.no_grad():                                                    
-        for _, (data, target) in enumerate(test_loader):
-            data, target = data.to(device), torch.flatten(target.to(device))   
+        for _, (data, target, patient_id, slice_idx) in enumerate(test_loader):
+            data, target = data.to(device), torch.flatten(target.to(device)) 
             out = model(data)                                                 
 
             out = torch.flatten(out)                                          
             
             all_out.append(out)                       
-            all_labels_test.append(target)               
+            all_labels_test.append(target)  
+            all_patient_id.extend(list(patient_id))
+            all_slice_idx.extend(slice_idx.tolist())     
             total_num_test += 1                         
 
     all_labels_npy = torch.cat(all_labels_test).detach().cpu().numpy().astype(np.int32) 
     all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()           
 
+    all_patient_id_npy = np.array(all_patient_id)
+    all_slice_idx_npy = np.array(all_slice_idx)
+
     auc_test = metrics.roc_auc_score(all_labels_npy, all_preds_npy)                    
         
-    return auc_test, all_preds_npy, all_labels_npy
+    return auc_test, all_preds_npy, all_labels_npy, all_patient_id_npy, all_slice_idx_npy
 
 def run_inference(config_t2):
     """
@@ -100,7 +107,9 @@ def run_inference(config_t2):
     # Convert predicted probabilities to binary predictions (0 or 1) using a threshold (e.g., 0.5)
 
     # AUC_test_diff, raw_preds_test_diff, labels_diff  = test(model_diff, test_loader_diff, device)    
-    AUC_test_t2, raw_preds_test_t2, labels_t2  = test(model_t2, test_loader_t2, device)    
+    AUC_test_t2, raw_preds_test_t2, labels_t2, patient_id_t2, slice_idx_t2  = test(model_t2, test_loader_t2, device)
+    print(raw_preds_test_t2.shape, labels_t2.shape, patient_id_t2.shape, slice_idx_t2.shape)
+    print(patient_id_t2, slice_idx_t2)    
     fpr_t2, tpr_t2, thresholds = metrics.roc_curve(labels_t2, raw_preds_test_t2)
 
     # Calculate Youden's J statistic
@@ -116,6 +125,19 @@ def run_inference(config_t2):
     binary_preds_t2_youden = (raw_preds_test_t2 >= youden_best_threshold).astype(int)
     binary_preds_t2_min_euclidean = (raw_preds_test_t2 >= optimal_threshold_euclidean).astype(int)
     binary_preds_t2_50 = (raw_preds_test_t2 >= 0.5).astype(int)
+
+    df_pred_results = pd.DataFrame({
+        'patient_id': patient_id_t2,
+        'slice_idx': slice_idx_t2,
+        'label': labels_t2,
+        'raw_pred': raw_preds_test_t2,
+        'binary_pred_youden': binary_preds_t2_youden,
+        'binary_pred_min_euclidean': binary_preds_t2_min_euclidean,
+        'binary_pred_50': binary_preds_t2_50
+    })
+    df_pred_results_sorted = df_pred_results.sort_values(by=['patient_id', 'slice_idx'])
+    save_pred_csv_path = os.path.join(config_t2['model_args']['rundir'], "t2w_predictions_with_id.csv")
+    df_pred_results_sorted.to_csv(save_pred_csv_path, index=False)
 
     # Calculate Precision, Recall, Accuracy, F1 Score, and Confusion Matrix
     precision_t2, recall_t2, accuracy_t2, f1_t2, confusion_matrix_t2 = calculate_metrics(labels_t2, binary_preds_t2_youden)
