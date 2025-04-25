@@ -2,6 +2,7 @@ import argparse
 import numpy as np
 import os
 import torch
+import torch.nn as nn
 from sklearn import metrics
 # from utils.load_fastmri_data_convnext_t2 import load_data
 from utils.custom_data_t2w_mask_adc import load_data
@@ -41,13 +42,16 @@ def train(model, optimizer, scheduler, train_loader, device):
 
     for _, (image, target) in enumerate(train_loader_tqdm):
         image = image.to(device)
-        target = torch.flatten(target.to(device)) 
-
+        target = torch.flatten(target.to(device))
+        print("line 46", target, target.shape)
         optimizer.zero_grad()                                            
-        out = model(image)                                                
-        out = torch.flatten(out)     
+        out = model(image)    
+        print("line 50", out)                                            
+        # out = torch.flatten(out)     
 
-        loss = train_loader.dataset.weighted_loss(out, target)          
+        # loss = train_loader.dataset.weighted_loss(out, target) 
+        criterion = nn.CrossEntropyLoss()
+        loss = criterion(out, target)       
         loss.backward()                                                
         optimizer.step()                                               
 
@@ -57,17 +61,29 @@ def train(model, optimizer, scheduler, train_loader, device):
         total_num += 1                                                  
 
     all_labels_npy = torch.cat(all_labels).detach().cpu().numpy().astype(np.int32)   
-    all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()         
-    # Convert raw predictions to binary predictions
-    binary_preds_npy = (all_preds_npy > 0.5).astype(int)
+    # all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()        # torch.softmax for multi-class   so
+    all_probs_npy = torch.softmax(torch.cat(all_out), dim=1).detach().cpu().numpy()
+    print("line 66", all_probs_npy, all_probs_npy.shape)
 
-    auc = metrics.roc_auc_score(all_labels_npy, all_preds_npy)                      
+    all_preds_npy = np.argmax(all_probs_npy, axis=1)
+    print("line 69", all_preds_npy, all_preds_npy.shape)
+
+    # Convert raw predictions to predictions
+    # binary_preds_npy = (all_preds_npy > 0.5).astype(int)
+
+    try:
+        auc = metrics.roc_auc_score(all_labels_npy, all_probs_npy, multi_class='ovr', average='macro')  
+
+    except ValueError as e:
+        # e.g. "Number of classes in y_true not equal …"
+        print(f"Skipping Val AUC: {e}")
+        auc = 0         
     
-    accuracy = metrics.accuracy_score(all_labels_npy, binary_preds_npy)
-    recall = metrics.recall_score(all_labels_npy, binary_preds_npy)
-    f1 = metrics.f1_score(all_labels_npy, binary_preds_npy)
+    accuracy = metrics.accuracy_score(all_labels_npy, all_preds_npy)
+    recall = metrics.recall_score(all_labels_npy, all_preds_npy, average='macro')
+    f1 = metrics.f1_score(all_labels_npy, all_preds_npy, average='macro')
 
-    conf_matrix = metrics.confusion_matrix(all_labels_npy, binary_preds_npy)
+    conf_matrix = metrics.confusion_matrix(all_labels_npy, all_preds_npy)
 
     current_loss = total_loss_train/total_num                           
     current_lr = get_lr(optimizer)                                        
@@ -102,25 +118,38 @@ def val(model, val_loader, device):
             # print(image.shape)
             target = torch.flatten(target.to(device)) 
             out = model(image)                                                
-            out = torch.flatten(out)                                          
-            loss = val_loader.dataset.weighted_loss(out, target)              
-            
+            # out = torch.flatten(out)   
+            # loss = val_loader.dataset.weighted_loss(out, target)      
+            criterion = nn.CrossEntropyLoss()
+            loss = criterion(out, target)                                            
+          
             all_out.append(out)                       
             all_labels_val.append(target)              
             total_loss_val += loss.item()              
             total_num_val += 1                         
 
     all_labels_npy = torch.cat(all_labels_val).detach().cpu().numpy().astype(np.int32) 
-    all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()           
-    binary_preds_npy = (all_preds_npy > 0.5).astype(int)
+    # all_preds_npy = torch.sigmoid(torch.cat(all_out)).detach().cpu().numpy()   
+    all_probs_npy = torch.softmax(torch.cat(all_out), dim=1).detach().cpu().numpy()
+    print("line 128", all_probs_npy, all_probs_npy.shape)        
+    # binary_preds_npy = (all_preds_npy > 0.5).astype(int)
 
-    auc_val = metrics.roc_auc_score(all_labels_npy, all_preds_npy)  
+    all_preds_npy = np.argmax(all_probs_npy, axis=1)
+    print("line 132", all_preds_npy, all_preds_npy.shape)
 
-    accuracy = metrics.accuracy_score(all_labels_npy, binary_preds_npy)
-    recall = metrics.recall_score(all_labels_npy, binary_preds_npy)
-    f1 = metrics.f1_score(all_labels_npy, binary_preds_npy)
+    try:
+        auc_val = metrics.roc_auc_score(all_labels_npy, all_probs_npy, multi_class='ovr', average='macro')  
+
+    except ValueError as e:
+        # e.g. "Number of classes in y_true not equal …"
+        print(f"Skipping Val AUC: {e}")
+        auc_val = 0
+
+    accuracy = metrics.accuracy_score(all_labels_npy, all_preds_npy)
+    recall = metrics.recall_score(all_labels_npy, all_preds_npy, average='macro')
+    f1 = metrics.f1_score(all_labels_npy, all_preds_npy, average='macro')
     
-    conf_matrix = metrics.confusion_matrix(all_labels_npy, binary_preds_npy)
+    conf_matrix = metrics.confusion_matrix(all_labels_npy, all_preds_npy)
 
     current_loss = total_loss_val/total_num_val                                         
         
@@ -150,7 +179,7 @@ def train_network(config):
         config['model_args']['rundir']
     )
 
-    print('Lengths: Train:{}, Val:{}, Test:{}'.format(len(train_loader), len(valid_loader), len(test_loader)))  
+    print('Lengths of DataLoader: Train:{}, Val:{}, Test:{}'.format(len(train_loader), len(valid_loader), len(test_loader)))  
     
     model = ConvNext_model(config)
     model.to(device)
@@ -226,19 +255,19 @@ def train_network(config):
             lowest_val_epoch = e
 
             if config['training']['save_ROC_AUC']:
-                    fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
-                    roc_auc = metrics.auc(fpr, tpr)
+                # fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
+                # roc_auc = metrics.auc(fpr, tpr)
 
-                    plt.figure()
-                    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-                    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-                    plt.xlabel('False Positive Rate')
-                    plt.ylabel('True Positive Rate')
-                    plt.title('Receiver Operating Characteristic (ROC)')
-                    plt.legend(loc='lower right')
-                    save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
-                    plt.savefig(save_path)
-                    plt.close()
+                plt.figure()
+                plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+                plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title('Receiver Operating Characteristic (ROC)')
+                plt.legend(loc='lower right')
+                save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
+                plt.savefig(save_path)
+                plt.close()
 
             if config['training']['save_model']:
                 PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
@@ -272,6 +301,7 @@ def get_parser():
     parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
     parser.add_argument('--focal_loss', type=str2bool, default=False, help='whether to use focal loss instead of weighted bce')
+    parser.add_argument('--ddp', action='store_false', help='whether use ddp for training')
     return parser
 
 

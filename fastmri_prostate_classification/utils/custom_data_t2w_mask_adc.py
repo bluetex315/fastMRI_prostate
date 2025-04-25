@@ -12,10 +12,10 @@ import matplotlib.pyplot as plt
 import shutil
 from sklearn.model_selection import train_test_split
 from monai.transforms import (
-    Compose, LoadImageD, EnsureChannelFirstd, RandAffined, RandFlipd, RandRotated, ScaleIntensityRanged, CenterSpatialCropd, NormalizeIntensityd, ResampleToMatchd, EnsureChannelFirstd
+    Compose, LoadImaged, Lambdad, EnsureChannelFirstd, RandAffined, RandFlipd, RandRotated, ScaleIntensityRanged, CenterSpatialCropd, NormalizeIntensityd, ResampleToMatchd, EnsureChannelFirstd
 )
-from monai.data import Dataset, DataLoader
-
+from monai.data import Dataset, CacheDataset, DataLoader
+import re
 
 # Define a custom wrapper to apply intensity scaling with probability
 def probabilistic_intensity_scaling(image, probability=0.5):
@@ -163,7 +163,7 @@ class FastMRIDataset(data.Dataset):
             if gland_mask_data is not None:
                 gland_mask_data = gland_mask_data[0]
 
-            label_data = np.load(row['label'])['pirads'][::-1]
+            label_data = np.load(row['label'])['pirads'][::-1]      # reverse label due to DICOM loading, the image is loaded in reverse
 
             start_idx = 0
             end_idx = t2w_data.shape[2] - 1
@@ -320,7 +320,266 @@ class FastMRIDataset(data.Dataset):
     def __len__(self):
         return len(self.data_df)
 
- 
+
+class FakeFastMRIDataset(data.Dataset):
+    """
+    Custom MONAI dictionary-based dataset for loading FastMRI prostate data at the slice level.
+
+    Parameters:
+    - datapath (str): Path to the folder containing patient data subfolders.
+    - labelpath (str): Path to the folder containing label files.
+    - norm_type (int): Integer representing the chosen normalization scheme.
+    - augment (bool): Flag indicating whether to apply data augmentation.
+    - split (str): One of 'train', 'val', or 'test' indicating the dataset split.
+    """
+    def __init__(self, config, datapath, labelpath, gland_maskpath, norm_type, augment, split):
+        super().__init__()
+        self.config = config
+        self.datapath = datapath
+        self.labelpath = labelpath
+        self.gland_maskpath = gland_maskpath
+        self.norm_type = norm_type
+        self.augment = augment
+        self.split = split
+        
+        print(f"LOADING ADC        --> {self.config['concat_adc']}")
+        print(f"LOADING gland_mask --> {self.config['concat_mask']}")
+        
+        rows = []
+        pattern = re.compile(
+            r'(?P<epoch>\d+)_'           
+            r'(?P<patient>\d+)_slice'    
+            r'(?P<slice>\d+)_'           
+            r'(?P<kind>class|fakeclass)'
+            r'(?P<label>\d+)_'           
+            r'(?P<suffix>orig|syn)\.nii\.gz'
+        )     # naming pattern of fake images
+
+
+        patient_dirs = [d for d in os.listdir(self.datapath) if d.startswith("patient_")]         # filter down to only the patient directories
+
+        # Extract the numeric ID from each name
+        patient_ids = []
+        for d in patient_dirs:
+            match = re.match(r"patient_(\d+)", d)
+            if match:
+                patient_ids.append(match.group(1))
+
+         # split off 70% train, 30% temp
+        train_ids, temp_ids = train_test_split(
+            patient_ids,
+            train_size=0.7,
+            random_state=42,
+            shuffle=True
+        )
+
+        # then split that 30% into equal val/test (0.15 each of original)
+        val_ids, test_ids = train_test_split(
+            temp_ids,
+            test_size=0.5,   # half of temp_ids → 0.15 of total
+            random_state=42,
+            shuffle=True
+        )
+
+        print(f"Train: {len(train_ids)} patients")
+        print(f"Val:   {len(val_ids)} patients")
+        print(f"Test:  {len(test_ids)} patients")
+        print("")
+
+        if self.split == "train":
+            patient_ids = train_ids
+        elif self.split == "val":
+            patient_ids = val_ids
+        else:
+            patient_ids = test_ids
+
+        for pt_id in patient_ids:       
+            pt_folder = os.path.join(datapath, "patient_"+pt_id)
+            if not os.path.isdir(pt_folder):
+                raise FileNotFoundError(f"Patient folder not found: {pt_folder}")
+            
+            grouped = {}
+            for path in os.listdir(pt_folder):      # iterate through patient folder, e.g `patient_078`
+                m = pattern.match(path)
+                if not m:
+                    continue
+
+                slice_idx  = int(m.group('slice'))   # e.g. 1
+                kind       = m.group('kind')         # "class" or "fakeclass"
+                label      = int(m.group('label'))   # the numeric class
+                suffix     = m.group('suffix')       # "orig" or "syn"
+                fullpath   = os.path.join(pt_folder, path)
+                
+                # group key: one entry per (patient, slice)
+                key = (pt_id, slice_idx)
+                if key not in grouped:
+                    grouped[key] = {
+                        "patient_id":   pt_id,
+                        "slice":        slice_idx,
+                        "orig":         None,
+                        "fake_classes": {},
+                    }
+
+                entry = grouped[key]
+                if kind == "class" and suffix == "orig":
+                    entry["orig"]  = fullpath
+                    entry["label"] = label
+                elif kind == "fakeclass" and suffix == "syn":
+                    entry.setdefault("fake_classes", {})[label] = fullpath
+
+            # turn each grouped entry into a flat row
+            for (pid, slice_idx), entry in grouped.items():
+                row = {
+                    "patient_id": pid,
+                    "slice_id":   slice_idx,
+                    "orig":       entry["orig"],
+                    "label":      entry["label"],
+                }
+                # now add fake_0…fake_4 (or whatever labels you have)
+                fake_dict = entry.get("fake_classes", {})
+                for lbl in range(5):  
+                    row[f"fake_{lbl}"] = fake_dict.get(lbl, None)
+
+                rows.append(row)
+                
+        self.df = pd.DataFrame(rows).sort_values(["patient_id","slice_id"], ignore_index=True)
+        print("dataset line445\n", self.df)
+        print("dataset line446\n", self.df['label'].value_counts())
+
+        recs = self.flatten_df()
+
+        print("<<<<<<<<<<<<<<<<<<<<<<<<<<< finished >>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n")
+
+        load_keys = ['image']
+
+        # Define MONAI transforms
+        if self.split == 'train': 
+            
+            self.transforms = Compose([
+                LoadImaged(keys=load_keys),
+                EnsureChannelFirstd(keys=load_keys),
+                RandAffined(
+                    keys=load_keys,
+                    prob=0.5,
+                    translate_range=(0, 16, 16)
+                ),
+                # ProbabilisticScaleIntensity(probability=0.5),
+                RandFlipd(
+                    keys=load_keys,
+                    prob=0.5, 
+                    spatial_axis=1
+                ),
+                RandRotated(
+                    keys=load_keys,
+                    range_x=12,   # Degrees of rotation for the x-axis (between -12 and 12)
+                    range_y=12,   # Degrees of rotation for the y-axis (between -12 and 12)
+                    range_z=0.0,  # No rotation for the z-axis
+                    prob=0.5,     # Ensure that the rotation is always applied
+                    keep_size=True, # Keep the same image size after rotation (reshape=False equivalent)
+                    padding_mode="zeros"
+                ),
+                # CenterSpatialCropd(keys=load_keys, roi_size=(224, 224)),
+                NormalizeIntensityd(keys=load_keys)
+            ])
+
+        else:
+            self.transforms = Compose([
+                LoadImaged(keys=load_keys),
+                EnsureChannelFirstd(keys=load_keys),
+                # CenterSpatialCropd(keys=load_keys, roi_size=(224, 224)),
+                NormalizeIntensityd(keys=load_keys)
+            ])
+
+    def flatten_df(self):
+        """
+        Flatten each row into a list of dicts:
+        - one for the original (paths in `orig`, label in `label`)
+        - one for each fake_X path
+        """
+        records = []
+        for _, row in self.df.iterrows():
+            if self.split == "train":       # only append fake images/labels when training. For val/test, use true images/labels
+                # synthetic slices
+                for fake_lbl in range(5):
+                    path = row[f"fake_{fake_lbl}"]
+                    if path is not None:
+                        records.append({
+                            "patient_id":      row['patient_id'],
+                            "slice_id":        row['slice_id'],
+                            "orig_image_path": row["orig"],
+                            "orig_label":      int(row["label"]),
+                            "image":           path,        # fake_image_path --> image
+                            "label":           fake_lbl     # fake_label --> label
+                        })
+            else:
+                records.append({
+                    "patient_id":      row['patient_id'],
+                    "slice_id":        row['slice_id'],
+                    "image":           row["orig"],         # orig_image_path --> image
+                    "label":           int(row["label"])    # orig_label --> label
+                })
+        return records
+
+    #  https://doi.org/10.1371/journal.pmed.1002699.s001 
+    def weighted_loss(self, prediction, target):
+        """
+        Compute the weighted cross-entropy loss.
+
+        Parameters:
+        - prediction (Tensor): Model predictions.
+        - target (Tensor): Ground truth labels.
+
+        Returns:
+        - loss (Tensor): Weighted cross-entropy loss.
+        """
+        weights_npy = np.array([self.weights[int(t)] for t in target.data])    
+        weights_tensor = torch.FloatTensor(weights_npy).cuda()          
+        if self.config['focal_loss']:
+            loss = sigmoid_focal_loss(prediction, target, alpha=0.95, gamma=2, reduction='mean') 
+        else:
+            loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
+        return loss
+
+    def __getitem__(self, index):
+        
+        recs = self.flatten_df()[index]
+
+        transformed = self.transforms(recs)
+
+        image = torch.FloatTensor(transformed['image'])
+        label = torch.tensor(recs['label'], dtype=torch.long)
+
+        # data_dict = {"t2w": self.data_df.iloc[index]['t2w']}
+
+        # # add 'adc' and 'mask' if the configuration requires it
+        # if self.config.get('concat_adc', True):
+        #     data_dict["adc"] = self.data_df.iloc[index]['adc']
+        #     # print(data_dict['adc'].shape)
+        # if self.config.get('concat_mask', True):
+        #     data_dict["gland_mask"] = self.data_df.iloc[index]['gland_mask']
+        #     # print(data_dict['gland_mask'].shape)
+        
+        # label = self.data_df.iloc[index]['label']
+        
+        # transformed = self.transforms(data_dict)
+
+        # image = torch.FloatTensor(transformed['t2w'])
+
+        # # Concatenate adc if it exists in the transformed data
+        # if self.config.get('concat_adc', True) and 'adc' in transformed:
+        #     image = torch.cat((image, transformed['adc']), dim=0)
+        # if self.config.get('concat_mask', True) and 'gland_mask' in transformed:
+        #     image = torch.cat((image, transformed['gland_mask']), dim=0)
+
+        # label = torch.FloatTensor([label])
+
+        return image, label
+
+
+    def __len__(self):
+        return len(self.flatten_df())
+
+
 def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, saveims, rundir):
     """
     Load FastMRI prostate data and create DataLoader instances for training, validation, and testing.
@@ -337,28 +596,14 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
     - test_loader (DataLoader): DataLoader for the test set.
     """
     # Create datasets
-    train_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment, split='train')
-    valid_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='val')
-    test_dataset = FastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='test')
+    # persistent dataset
+    train_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment, split='train')
+    valid_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='val')
+    test_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='test')
 
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=32, num_workers=4, shuffle=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=32, num_workers=4, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=32, num_workers=4, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=128, num_workers=4, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=128, num_workers=0, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=128, num_workers=0, shuffle=False)
 
     return train_loader, valid_loader, test_loader
-
-
-if __name__ == "__main__":
-    datapath = "/home/lc2382/project/fastMRI_NYU/nifti"
-    labelpath = "/home/lc2382/project/fastMRI_NYU/labels/pirads_t2w_npz"
-    norm_type = 2
-        
-    # dataset = FastMRIDataset(datapath, labelpath, norm_type, augment=False, split='train')
-    # print(f"Total number of slices in dataset: {len(dataset)}")
-
-    train_loader, val_loader, test_loader = load_data(datapath, labelpath, norm_type, augment=False)
-
-    # print(len(train_loader))
-    image, label = next(iter(train_loader))
-    print(image.shape, label)

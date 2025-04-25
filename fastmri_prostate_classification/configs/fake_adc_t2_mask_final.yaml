@@ -1,0 +1,34 @@
+model_args:
+      model: 'convnext'                     # default, this field makes no difference 
+      patience: 15                          # num epochs to monitor the validation loss for overfitting before early stopping
+      rundir: 't2_final_'                   # string - where the results and logs of this model get stored 
+      optimizer: 'adam'                     # either 'adam' or 'SGD' (adam will be WAdam)
+      scheduler: 'multistep'               # either 'exponentiallr', 'multistep', 'cosine', 'plat' or leave 'none'
+      gamma: 0.8                            # how much to reduce LR in scheduler 
+      ms_gamma: [0.5,0.8,0.8,0.8]           # how much to reduce LR in multi step scheduler 
+      lr_decay_steps: [4, 10, 20, 30]       # what epoch nums do we want to reduce LR at [10, 20, 40] etc
+      scheduler_plat_loss: True             # True if you want to reduce LR when gains on validation plateau
+      scheduler_plat_auc: False             # True if you want to reduce LR when gains on validation plateau
+      warm_up: False                        # Warm
+      initial_lr: 0.000001
+      lr: 0.00001                           # typically 1e-03
+      momentum: 0.99                        # typically 1e-02
+      weight_decay: 0.05                    # 1e-04
+      amsgrad: True                         # True to use amsgrad https://www.fast.ai/posts/2018-07-02-adam-weight-decay.html https://openreview.net/forum?id=ryQu7f-RZ
+      num_classes: 5
+
+data:
+      datapath: "/home/lc2382/project/segmentation-guided-diffusion/experiments/ddim-fastMRI_NYU-128-segguided-classCond-CFG-eval_20250416_173309/samples/0399"
+      labelpath: "/home/lc2382/project/fastMRI_NYU/labels/pirads_t2w_npz"
+      glandmask_path: "/home/lc2382/project/fastMRI_NYU/segm_mask_v2_binarize"
+      norm_type: 2                     # 1 = percentile clip, 2 = standardisation, 3 = min-max-scaling, 4 = Gaussian norm 
+      
+training:
+      augment: False                       # True if augmenatation = on see utils/augmentation_3d.py for details
+      saveims: False                       # Recommend True to check on status of training images especially if augment
+      save_ROC_AUC: False                   
+      max_epochs: 100                      # max_epochs to train for 
+      save_model: False                     # Only save model on final set on tuned models
+
+load_model_epoch: 4
+results_fol: "../../results_t2"
