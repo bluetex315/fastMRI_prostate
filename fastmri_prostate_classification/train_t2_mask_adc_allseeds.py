@@ -131,7 +131,7 @@ def train(model, optimizer, scheduler, train_loader, device):
         return (auc, current_lr, current_loss, accuracy, recall, f1, conf_matrix, torch.cat(all_labels), torch.cat(all_out))
     
     else:
-        return (None, )*9
+        return (None,)*9
 
 def val(model, val_loader, device):
     """
@@ -257,6 +257,8 @@ def train_network(config, rank, world_size, is_main):
     if config['ddp']:
         torch.cuda.set_device(rank)
         device = torch.device(f'cuda:{rank}')
+        print("train_network line260 device", device)
+        print()
     else:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if is_main:
@@ -300,8 +302,8 @@ def train_network(config, rank, world_size, is_main):
     lowest_val_epoch = -1                                  
     for e in range(config['training']['max_epochs']):  
         if config['ddp']:
-            train_loader.sampler.set_epoch(epoch)
-            valid_loader.sampler.set_epoch(epoch)
+            train_loader.sampler.set_epoch(e)
+            valid_loader.sampler.set_epoch(e)
             
         model.train()                                 
         AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, device)       
@@ -411,11 +413,17 @@ def get_parser():
     parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
     parser.add_argument('--focal_loss', type=str2bool, default=False, help='whether to use focal loss instead of weighted bce')
-    parser.add_argument('--ddp', action='store_false', help='whether use ddp for')
+    parser.add_argument('--ddp', action='store_true', help='whether use ddp for')
     return parser
 
 
 def main_worker(rank, world_size, args):
+
+    torch.cuda.set_device(rank)
+    print(f"[Rank {rank}/{world_size}] 🚀 binding to GPU {rank} -> "
+          f"current_device={torch.cuda.current_device()}")
+    print()
+
     # 1) DDP setup
     dist.init_process_group(backend='nccl',
                             init_method='tcp://127.0.0.1:29500',
@@ -468,7 +476,6 @@ def main_worker(rank, world_size, args):
             # Copy config file to the new directory
             copyfile(args.config_file, os.path.join(rundir, 'params.txt'))
 
-
         # Set the random seed
         torch.manual_seed(seed_select + rank)
         torch.cuda.manual_seed(seed_select + rank)
@@ -480,9 +487,9 @@ def main_worker(rank, world_size, args):
         print(config)
         train_network(config, rank, world_size, is_main)
 
-        # 6) Cleanup
-        if config['ddp']:
-            dist.destroy_process_group()
+    # 6) Cleanup
+    if config['ddp']:
+        dist.destroy_process_group()
 
 # if __name__ == '__main__':
 #     """

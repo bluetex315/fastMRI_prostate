@@ -453,7 +453,7 @@ class FakeFastMRIDataset(data.Dataset):
         print(f"dataset line446 {self.split}dataset real PI-RADS distribution")
         print(self.df['label'].value_counts().to_dict())
 
-        recs = self.flatten_df()
+        self.records = self.flatten_df()
 
         print("<<<<<<<<<<<<<<<<<<<<<<<<<<< finished >>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n")
 
@@ -549,7 +549,7 @@ class FakeFastMRIDataset(data.Dataset):
 
     def __getitem__(self, index):
         
-        recs = self.flatten_df()[index]
+        recs = self.records[index]
 
         transformed = self.transforms(recs)
 
@@ -615,14 +615,14 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
         val_sampler = DistributedSampler(valid_dataset, num_replicas=world_size, rank=rank, shuffle=False)
         test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False)
 
-        train_loader = DataLoader(train_dataset, batch_size=64, sampler=train_sampler, num_workers=4, pin_memory=True)
-        val_loader = DataLoader(valid_dataset, batch_size=64, sampler=val_sampler, num_workers=0, pin_memory=True)
-        test_loader = DataLoader(test_dataset, batch_size=64, sampler=test_sampler, num_workers=0, pin_memory=True)
+        train_loader = DataLoader(train_dataset, batch_size=128, sampler=train_sampler, num_workers=4, pin_memory=True)
+        val_loader = DataLoader(valid_dataset, batch_size=128, sampler=val_sampler, num_workers=0, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=128, sampler=test_sampler, num_workers=0, pin_memory=True)
 
     else:
         # Create data loaders
-        train_loader = DataLoader(train_dataset, batch_size=64, num_workers=4, shuffle=True)
-        val_loader = DataLoader(valid_dataset, batch_size=64, num_workers=0, shuffle=False)
-        test_loader = DataLoader(test_dataset, batch_size=64, num_workers=0, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=128, num_workers=4, shuffle=True)
+        val_loader = DataLoader(valid_dataset, batch_size=128, num_workers=0, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=128, num_workers=0, shuffle=False)
 
     return train_loader, val_loader, test_loader
