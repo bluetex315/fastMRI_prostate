@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import torch.utils.data as data
+from torch.utils.data.distributed import DistributedSampler
 from torch.autograd import Variable
 from torchvision.ops import sigmoid_focal_loss
 import random
@@ -16,6 +17,7 @@ from monai.transforms import (
 )
 from monai.data import Dataset, CacheDataset, DataLoader
 import re
+
 
 # Define a custom wrapper to apply intensity scaling with probability
 def probabilistic_intensity_scaling(image, probability=0.5):
@@ -342,6 +344,7 @@ class FakeFastMRIDataset(data.Dataset):
         self.augment = augment
         self.split = split
         
+        print(f"---------------- START Loading {self.split} Dataset --------------")
         print(f"LOADING ADC        --> {self.config['concat_adc']}")
         print(f"LOADING gland_mask --> {self.config['concat_mask']}")
         
@@ -443,8 +446,12 @@ class FakeFastMRIDataset(data.Dataset):
                 rows.append(row)
                 
         self.df = pd.DataFrame(rows).sort_values(["patient_id","slice_id"], ignore_index=True)
-        print("dataset line445\n", self.df)
-        print("dataset line446\n", self.df['label'].value_counts())
+        print(f"dataset line445 {self.split}dataset")
+        print(self.df)
+        print()
+
+        print(f"dataset line446 {self.split}dataset real PI-RADS distribution")
+        print(self.df['label'].value_counts().to_dict())
 
         recs = self.flatten_df()
 
@@ -580,7 +587,7 @@ class FakeFastMRIDataset(data.Dataset):
         return len(self.flatten_df())
 
 
-def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, saveims, rundir):
+def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, saveims, rundir, rank=0, world_size=1):
     """
     Load FastMRI prostate data and create DataLoader instances for training, validation, and testing.
 
@@ -595,15 +602,27 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
     - valid_loader (DataLoader): DataLoader for the validation set.
     - test_loader (DataLoader): DataLoader for the test set.
     """
+
     # Create datasets
     # persistent dataset
     train_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment, split='train')
     valid_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='val')
     test_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='test')
 
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=128, num_workers=4, shuffle=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=128, num_workers=0, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=128, num_workers=0, shuffle=False)
+    if world_size > 1:
+        # DDP case
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        val_sampler = DistributedSampler(valid_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False)
 
-    return train_loader, valid_loader, test_loader
+        train_loader = DataLoader(train_dataset, batch_size=64, sampler=train_sampler, num_workers=4, pin_memory=True)
+        val_loader = DataLoader(valid_dataset, batch_size=64, sampler=val_sampler, num_workers=0, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=64, sampler=test_sampler, num_workers=0, pin_memory=True)
+
+    else:
+        # Create data loaders
+        train_loader = DataLoader(train_dataset, batch_size=64, num_workers=4, shuffle=True)
+        val_loader = DataLoader(valid_dataset, batch_size=64, num_workers=0, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=64, num_workers=0, shuffle=False)
+
+    return train_loader, val_loader, test_loader

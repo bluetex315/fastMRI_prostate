@@ -1,6 +1,5 @@
 model_args:
       model: 'convnext'                     # default, this field makes no difference 
-      patience: 15                          # num epochs to monitor the validation loss for overfitting before early stopping
       rundir: 't2_final_'                   # string - where the results and logs of this model get stored 
       optimizer: 'adam'                     # either 'adam' or 'SGD' (adam will be WAdam)
       scheduler: 'multistep'               # either 'exponentiallr', 'multistep', 'cosine', 'plat' or leave 'none'
@@ -9,8 +8,8 @@ model_args:
       lr_decay_steps: [4, 10, 20, 30]       # what epoch nums do we want to reduce LR at [10, 20, 40] etc
       scheduler_plat_loss: True             # True if you want to reduce LR when gains on validation plateau
       scheduler_plat_auc: False             # True if you want to reduce LR when gains on validation plateau
-      warm_up: False                        # Warm
-      initial_lr: 0.000001
+      warm_up: False                        # Warmup
+      initial_lr: 0.000005
       lr: 0.00001                           # typically 1e-03
       momentum: 0.99                        # typically 1e-02
       weight_decay: 0.05                    # 1e-04
@@ -24,6 +23,8 @@ data:
       norm_type: 2                     # 1 = percentile clip, 2 = standardisation, 3 = min-max-scaling, 4 = Gaussian norm 
       
 training:
+      early_stop: False
+      patience: 15                          # num epochs to monitor the validation loss for overfitting before early stopping
       augment: False                       # True if augmenatation = on see utils/augmentation_3d.py for details
       saveims: False                       # Recommend True to check on status of training images especially if augment
       save_ROC_AUC: False                   
