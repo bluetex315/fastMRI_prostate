@@ -16,6 +16,8 @@ import yaml
 import pickle
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from datetime import datetime
+
 
 def train(model, optimizer, scheduler, train_loader, device):
     """
@@ -47,9 +49,8 @@ def train(model, optimizer, scheduler, train_loader, device):
         out = model(images)                                         
         # out = torch.flatten(out)     
 
-        # loss = train_loader.dataset.weighted_loss(out, targets) 
-        criterion = nn.CrossEntropyLoss()
-        loss = criterion(out, targets)       
+        loss = train_loader.dataset.loss(out, targets) 
+          
         loss.backward()                                                
         optimizer.step()                                               
 
@@ -266,7 +267,7 @@ def train_network(config, rank, world_size, is_main):
     
     train_loader, valid_loader, test_loader = load_data(
         config,
-        config['data']['datapath'], 
+        config['data']['fake_datapath'], 
         config["data"]["labelpath"],
         config["data"]["glandmask_path"], 
         int(config['data']['norm_type']),  
@@ -423,15 +424,23 @@ def main_worker(rank, world_size, args):
     print(f"[Rank {rank}/{world_size}] 🚀 binding to GPU {rank} -> "
           f"current_device={torch.cuda.current_device()}")
     print()
+    
+    if args.ddp:
+        # 1) DDP setup
+        torch.cuda.set_device(rank)
+        
+        dist.init_process_group(backend='nccl',
+                                init_method='tcp://127.0.0.1:29500',
+                                rank=rank,
+                                world_size=world_size)
+        
+        device = torch.device(f'cuda:{rank}')
+        is_main = (rank == 0)
 
-    # 1) DDP setup
-    dist.init_process_group(backend='nccl',
-                            init_method='tcp://127.0.0.1:29500',
-                            rank=rank,
-                            world_size=world_size)
-    torch.cuda.set_device(rank)
-    device = torch.device(f'cuda:{rank}')
-    is_main = (rank == 0)
+    else:
+        # single-GPU / CPU path: never touch dist
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        is_main = True
 
     # 2) load & broadcast config
     with open(args.config_file) as f:
@@ -444,17 +453,21 @@ def main_worker(rank, world_size, args):
         # Use the specific seed from the list
         seed_list = [seed_list[args.index_seed]]
 
-    # 4) Loop through all seeds
+    # Set the model directory based on the seed and time
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")   # e.g. "20250430_142532"
+
+    # 4) keep track of other settings
+    config = dict(base_cfg)
+    config['concat_mask'] = args.concat_mask
+    config['concat_adc'] = args.concat_adc
+    config['focal_loss'] = args.focal_loss
+    config['ddp'] = args.ddp
+
+    # 5) Loop through all seeds
     for seed_select in seed_list:
         
-        config = dict(base_cfg)
-        config['concat_mask'] = args.concat_mask
-        config['concat_adc'] = args.concat_adc
-        config['focal_loss'] = args.focal_loss
         config['seed'] = seed_select
-        config['ddp'] = args.ddp
 
-        # Set the model directory based on the seed
         main_fol = config["results_fol"]
         subfolder = 't2w'  # Always include 't2w' as it's the base modality
 
@@ -462,8 +475,13 @@ def main_worker(rank, world_size, args):
             subfolder += '_adc'
         if config['concat_mask']:
             subfolder += '_mask'
-
-        config['model_args']['rundir'] = os.path.join(main_fol, subfolder, config['model_args']['rundir'] + '_SEED_' + str(seed_select))
+        
+        config['model_args']['rundir'] = os.path.join(
+            main_fol,
+            subfolder,
+            ts,
+            f"SEED_{seed_select}"
+        )
         print("Model rundir:{}".format(config['model_args']['rundir']))
 
         # Create directory if it doesn't exist
@@ -491,70 +509,16 @@ def main_worker(rank, world_size, args):
     if config['ddp']:
         dist.destroy_process_group()
 
-# if __name__ == '__main__':
-#     """
-#     Main script for training the ConvNext model with multiple seeds.
-#     """
-#     args_con = get_parser().parse_args()
-#     seed_list = [10383, 44820, 238, 3939, 74783, 92938, 143, 2992, 7373, 988]
-
-#     # Check if a specific seed index is provided
-#     if args_con.index_seed is not None:
-#         # Use the specific seed from the list
-#         seed_select = seed_list[args_con.index_seed]
-#         seed_list = [seed_select]
-
-#     # Loop through all seeds
-#     for seed_select in seed_list:
-#         # Load config file
-#         with open(args_con.config_file) as f:
-#             args = yaml.load(f, Loader=yaml.UnsafeLoader)
-
-#         # Set additional arguments
-#         args['concat_mask'] = args_con.concat_mask
-#         args['concat_adc'] = args_con.concat_adc
-#         args['seed'] = seed_select
-#         args['focal_loss'] = args_con.focal_loss
-
-#         # Set the model directory based on the seed
-#         main_fol = args["results_fol"]
-#         subfolder = 't2w'  # Always include 't2w' as it's the base modality
-
-#         if args['concat_adc']:
-#             subfolder += '_adc'
-#         if args['concat_mask']:
-#             subfolder += '_mask'
-
-#         args['model_args']['rundir'] = os.path.join(main_fol, subfolder, args['model_args']['rundir'] + '_SEED_' + str(seed_select))
-#         print("Model rundir:{}".format(args['model_args']['rundir']))
-
-#         # Create directory if it doesn't exist
-#         if not os.path.isdir(args['model_args']["rundir"]):
-#             os.makedirs(os.path.join(args['model_args']["rundir"]))
-
-#         # Copy config file to the new directory
-#         copyfile(args_con.config_file, os.path.join(args['model_args']['rundir'], 'params.txt'))
-
-#         # Set the random seed
-#         torch.manual_seed(seed_select)
-#         torch.cuda.manual_seed(seed_select)
-#         torch.backends.cudnn.deterministic = True
-#         torch.backends.cudnn.benchmark = False
-#         np.random.seed(seed_select)
-
-#         # Print configuration and start training
-#         print(args)
-#         train_network(args)
-
 if __name__ == "__main__":
 
     args = get_parser().parse_args()
 
     world_size = torch.cuda.device_count()
 
-    print(f"main line549 <<<<<<<<<<<<<<<<<<<<<< world size: {world_size} >>>>>>>>>>>>>>>>>>>>>>>>")
+    print(f"\n[MAIN] <<<<<<<<<<<<<<<<<<<<<< world size: {world_size} >>>>>>>>>>>>>>>>>>>>>>>> \n")
     # if we have more than one, spawn that many processes
     if world_size > 1:
+        print("[MAIN] <<<<<<<<<<<<<<<<<<<<<< DDP TRAINING >>>>>>>>>>>>>>>>>>>>>>>>\n")
         torch.multiprocessing.spawn(
             main_worker,               # the function to run in each process
             args=(world_size, args),   # extra args passed to main_worker
@@ -562,5 +526,7 @@ if __name__ == "__main__":
             join=True
         )
     else:
+        print("[MAIN] <<<<<<<<<<<<<<<<<<<<<< REGULAR TRAINING >>>>>>>>>>>>>>>>>>>>>>>>\n")
         # single‐GPU or CPU: just call main_worker once with rank=0
+        args.ddp = False        # cannot use ddp on only 1 card, no matter the setting is
         main_worker(rank=0, world_size=1, args=args)

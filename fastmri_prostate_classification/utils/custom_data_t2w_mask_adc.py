@@ -148,7 +148,7 @@ class FastMRIDataset(data.Dataset):
 
             load_keys = list(temp_dict.keys())
             # resampling adc into t2 space
-            transforms = [LoadImageD(keys=load_keys, image_only=True)]
+            transforms = [LoadImaged(keys=load_keys, image_only=True)]
             transforms.append(EnsureChannelFirstd(keys=load_keys))
             if 'adc' in temp_dict:
                 transforms.append(ResampleToMatchd(keys='adc', key_dst='t2w', mode='bilinear'))
@@ -344,7 +344,7 @@ class FakeFastMRIDataset(data.Dataset):
         self.augment = augment
         self.split = split
         
-        print(f"---------------- START Loading {self.split} Dataset --------------")
+        print(f"\n\n-------------------------- START Loading {self.split} Dataset --------------------------")
         print(f"LOADING ADC        --> {self.config['concat_adc']}")
         print(f"LOADING gland_mask --> {self.config['concat_mask']}")
         
@@ -453,9 +453,22 @@ class FakeFastMRIDataset(data.Dataset):
         print(f"dataset line446 {self.split}dataset real PI-RADS distribution")
         print(self.df['label'].value_counts().to_dict())
 
+        # compute class-level weights for real data (weights computed by TRAINING only)
+        if self.split == 'train':
+            counts = self.df['label'].value_counts().sort_index().values.astype(np.float32)
+            inv_counts = 1.0 / (counts + 1e-6)
+            norm_weights = inv_counts / inv_counts.sum() * len(counts)
+            self.class_weights = torch.tensor(norm_weights, dtype=torch.float)
+            self.config['data']['train_class_weights'] = self.class_weights.tolist()
+        else:
+            w = self.config['data'].get('train_class_weights', None)
+            if w is None:
+                raise ValueError('train_class_weights must be set in config for val/test splits')
+            self.class_weights = torch.tensor(w, dtype=torch.float)
+        
         self.records = self.flatten_df()
 
-        print("<<<<<<<<<<<<<<<<<<<<<<<<<<< finished >>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n")
+        print(f"-------------------------- FINISH defining/loading {self.split} Dataset --------------------------\n\n")
 
         load_keys = ['image']
 
@@ -505,7 +518,7 @@ class FakeFastMRIDataset(data.Dataset):
         """
         records = []
         for _, row in self.df.iterrows():
-            if self.split == "train":       # only append fake images/labels when training. For val/test, use true images/labels
+            if self.split == "train" and self.config['data']['use_synthetic_data']:       # only append fake images/labels when training AND use_synthetic_data. For val/test, use true images/labels
                 # synthetic slices
                 for fake_lbl in range(5):
                     path = row[f"fake_{fake_lbl}"]
@@ -528,7 +541,7 @@ class FakeFastMRIDataset(data.Dataset):
         return records
 
     #  https://doi.org/10.1371/journal.pmed.1002699.s001 
-    def weighted_loss(self, prediction, target):
+    def loss(self, prediction, target):
         """
         Compute the weighted cross-entropy loss.
 
@@ -537,16 +550,17 @@ class FakeFastMRIDataset(data.Dataset):
         - target (Tensor): Ground truth labels.
 
         Returns:
-        - loss (Tensor): Weighted cross-entropy loss.
+        - nn.CrossEntropyLoss(): (Weighted) cross-entropy loss.
         """
-        weights_npy = np.array([self.weights[int(t)] for t in target.data])    
-        weights_tensor = torch.FloatTensor(weights_npy).cuda()          
-        if self.config['focal_loss']:
-            loss = sigmoid_focal_loss(prediction, target, alpha=0.95, gamma=2, reduction='mean') 
+        if self.split == 'train' and not self.config['data']['use_synthetic_data']:
+            # use weighted CE
+            weight = self.class_weights.to(prediction.device)
+            criterion = torch.nn.CrossEntropyLoss(weight=weight)
+            return criterion(prediction, target)
         else:
-            loss = F.binary_cross_entropy_with_logits(prediction, target, weight=Variable(weights_tensor)) 
-        return loss
-
+            # standard CE
+            return torch.nn.CrossEntropyLoss()(prediction, target)
+         
     def __getitem__(self, index):
         
         recs = self.records[index]
@@ -555,30 +569,6 @@ class FakeFastMRIDataset(data.Dataset):
 
         image = torch.FloatTensor(transformed['image'])
         label = torch.tensor(recs['label'], dtype=torch.long)
-
-        # data_dict = {"t2w": self.data_df.iloc[index]['t2w']}
-
-        # # add 'adc' and 'mask' if the configuration requires it
-        # if self.config.get('concat_adc', True):
-        #     data_dict["adc"] = self.data_df.iloc[index]['adc']
-        #     # print(data_dict['adc'].shape)
-        # if self.config.get('concat_mask', True):
-        #     data_dict["gland_mask"] = self.data_df.iloc[index]['gland_mask']
-        #     # print(data_dict['gland_mask'].shape)
-        
-        # label = self.data_df.iloc[index]['label']
-        
-        # transformed = self.transforms(data_dict)
-
-        # image = torch.FloatTensor(transformed['t2w'])
-
-        # # Concatenate adc if it exists in the transformed data
-        # if self.config.get('concat_adc', True) and 'adc' in transformed:
-        #     image = torch.cat((image, transformed['adc']), dim=0)
-        # if self.config.get('concat_mask', True) and 'gland_mask' in transformed:
-        #     image = torch.cat((image, transformed['gland_mask']), dim=0)
-
-        # label = torch.FloatTensor([label])
 
         return image, label
 
@@ -604,11 +594,10 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
     """
 
     # Create datasets
-    # persistent dataset
     train_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment, split='train')
     valid_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='val')
     test_dataset = FakeFastMRIDataset(config, datapath, labelpath, gland_maskpath, norm_type, augment=False, split='test')
-
+    
     if world_size > 1:
         # DDP case
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
