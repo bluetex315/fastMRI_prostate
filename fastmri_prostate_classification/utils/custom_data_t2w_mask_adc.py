@@ -368,11 +368,11 @@ class FakeFastMRIDataset(data.Dataset):
             if match:
                 patient_ids.append(match.group(1))
 
-         # split off 70% train, 30% temp
+        # split off 70% train, 30% temp
         train_ids, temp_ids = train_test_split(
             patient_ids,
             train_size=0.7,
-            random_state=42,
+            random_state=self.config['seed'],
             shuffle=True
         )
 
@@ -380,7 +380,7 @@ class FakeFastMRIDataset(data.Dataset):
         val_ids, test_ids = train_test_split(
             temp_ids,
             test_size=0.5,   # half of temp_ids → 0.15 of total
-            random_state=42,
+            random_state=self.config['seed'],
             shuffle=True
         )
 
