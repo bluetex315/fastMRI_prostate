@@ -5,10 +5,11 @@ model_args:
       scheduler: 'multistep'                # either 'exponentiallr', 'multistep', 'cosine', 'plat' or leave 'none'
       gamma: 0.8                            # how much to reduce LR in scheduler 
       ms_gamma: [0.8,0.8,0.8,0.8]           # how much to reduce LR in multi step scheduler 
-      lr_decay_steps: [10, 40, 80, 120]       # what epoch nums do we want to reduce LR at [10, 20, 40] etc
-      scheduler_plat_loss: True             # True if you want to reduce LR when gains on validation plateau
+      lr_decay_steps: [10, 20, 40, 80, 120]       # what epoch nums do we want to reduce LR at [10, 20, 40] etc
+      scheduler_plat_loss: False            # True if you want to reduce LR when gains on validation plateau
       scheduler_plat_auc: False             # True if you want to reduce LR when gains on validation plateau
-      warm_up: False                        # Warmup
+      warm_up: True                         # Warmup
+      warmup_epochs: 5
       initial_lr: 0.00001
       lr: 0.00005                           # typically 1e-03
       momentum: 0.99                        # typically 1e-02
@@ -27,11 +28,12 @@ data:
 training:
       early_stop: False
       patience: 15                          # num epochs to monitor the validation loss for overfitting before early stopping
-      augment: False                       # True if augmenatation = on see utils/augmentation_3d.py for details
-      saveims: False                       # Recommend True to check on status of training images especially if augment
+      augment: False                       # now deprecated May 05 2025, augment is always applied, details see ./utils/custom_data_t2w_mask_adc.py
+      saveims: True                       # Recommend True to check on status of training images especially if augment
+      saveims_format: ['png', 'nifti', 'npz']
       save_ROC_AUC: False                   
-      max_epochs: 200                      # max_epochs to train for 
-      save_model: False                     # Only save model on final set on tuned models
+      max_epochs: 100                      # max_epochs to train for 
+      save_model: True                     # Only save model on final set on tuned models
 
 load_model_epoch: 4
 results_fol: "../../results_t2"

@@ -41,7 +41,7 @@ def train(model, optimizer, scheduler, train_loader, device):
 
     total_loss_train, total_num, all_out, all_labels = 0.0, 0, [], []  
 
-    for images, targets in tqdm(train_loader, desc="Training", disable=(dist.is_initialized() and dist.get_rank()!=0)):
+    for images, targets, patient_ids, slice_ids in tqdm(train_loader, desc="Training", disable=(dist.is_initialized() and dist.get_rank()!=0)):
         images = images.to(device)
         targets = torch.flatten(targets.to(device))
 
@@ -151,16 +151,14 @@ def val(model, val_loader, device):
     - raw_preds_validation (Tensor): Concatenated raw predictions from the validation set.
     """
 
-    model.eval()  
+    model.eval()
 
     total_loss_val, total_num_val, all_out, all_labels_val = 0.0, 0, [], []  
  
     val_loader_tqdm = tqdm(val_loader, desc="Validating", unit="batch")  
         
     with torch.no_grad():                                                    
-        for images, targets in tqdm(val_loader,
-                                    desc="Validating",
-                                    disable=(dist.is_initialized() and dist.get_rank() != 0)):
+        for images, targets, patient_ids, slice_ids in tqdm(val_loader, desc="Validating", disable=(dist.is_initialized() and dist.get_rank() != 0)):
             images = images.to(device)
             targets = torch.flatten(targets.to(device)) 
 
@@ -266,16 +264,17 @@ def train_network(config, rank, world_size, is_main):
         print(f"[Rank {rank}] Using device {device}")
     
     train_loader, valid_loader, test_loader = load_data(
-        config,
-        config['data']['fake_datapath'], 
-        config["data"]["labelpath"],
-        config["data"]["glandmask_path"], 
-        int(config['data']['norm_type']),  
-        config['training']['augment'], 
-        config['training']['saveims'], 
-        config['model_args']['rundir'],
-        rank,
-        world_size
+        config=config,
+        datapath=config['data']['fake_datapath'], 
+        labelpath=config["data"]["labelpath"],
+        gland_maskpath=config["data"]["glandmask_path"], 
+        norm_type=int(config['data']['norm_type']),  
+        augment=config['training']['augment'], 
+        saveims=config['training']['saveims'], 
+        saveims_format=config['training']['saveims_format'],
+        rundir=config['model_args']['rundir'],
+        rank=rank,
+        world_size=world_size
     )
 
     print('Lengths of DataLoader: Train:{}, Val:{}, Test:{}'.format(len(train_loader), len(valid_loader), len(test_loader)))  
@@ -295,12 +294,22 @@ def train_network(config, rank, world_size, is_main):
     early_stopping = EarlyStopping(patience=config['training']['patience'], verbose=is_main)  
     
     dirin = config['model_args']['rundir']
+    loss_dir = os.path.join(dirin, "checkpoints", "best_loss_models")
+    auc_dir = os.path.join(dirin, "checkpoints", "best_auc_models")
     if is_main:
+        os.makedirs(loss_dir, exist_ok=True)
+        os.makedirs(auc_dir, exist_ok=True)
         writer = SummaryWriter(log_dir=config['model_args']['rundir'])
 
     saver = dict()    
     lowest_val_loss = float('inf')
-    lowest_val_epoch = -1                                  
+    lowest_val_epoch = -1        
+
+    best_loss_models = []    # list of (loss, epoch)
+    best_auc_models  = []    # list of (auc, epoch)
+    saved_loss_epochs = set()
+    saved_auc_epochs  = set()
+
     for e in range(config['training']['max_epochs']):  
         if config['ddp']:
             train_loader.sampler.set_epoch(e)
@@ -322,8 +331,9 @@ def train_network(config, rank, world_size, is_main):
             elif config['model_args']['scheduler_plat_auc']:
                 scheduler2.step(AUC_val)
             else:
-                raise ValueError('An unsupported type of scheduler.')    
-            
+                pass
+                # raise ValueError('An unsupported type of scheduler.')    
+        
         if config['model_args']['warm_up']:
             if e < config['model_args']['warmup_epochs']:
                 warmup_scheduler.step()
@@ -363,28 +373,53 @@ def train_network(config, rank, world_size, is_main):
             saver[e]['train_auc'] = AUC_train
             saver[e]['train_loss'] = current_loss_train
 
-            if current_loss_val < lowest_val_loss:
-                lowest_val_loss = current_loss_val
-                lowest_val_epoch = e
+            if config['training']['save_model']:
+                best_loss_models.append((current_loss_val, e))
+                best_loss_models = sorted(best_loss_models, key=lambda x: x[0])[:3]
+                for loss_val, epoch_idx in best_loss_models:
+                    if epoch_idx not in saved_loss_epochs:
+                        ckpt_path = os.path.join(loss_dir, f"model_val_loss_top3_epoch_{epoch_idx}.pth")
+                        torch.save(model.state_dict(), ckpt_path)
+                        saved_loss_epochs.add(epoch_idx)
+                        print(f"[Epoch {epoch_idx}] Saved loss checkpoint → {ckpt_path}")
 
-                if config['training']['save_ROC_AUC']:
-                    # fpr, tpr, _ = metrics.roc_curve(labels_validation.detach().cpu().numpy(), raw_preds_validation.detach().cpu().numpy())
-                    # roc_auc = metrics.auc(fpr, tpr)
+            if config['training']['save_ROC_AUC']:
+                best_auc_models.append((roc_auc, e))
+                best_auc_models = sorted(best_auc_models, key=lambda x: x[0], reverse=True)[:3]
+                for auc_val, epoch_idx in best_auc_models:
+                    if epoch_idx not in saved_auc_epochs:
+                        # model checkpoint
+                        ckpt_path = os.path.join(auc_dir, f"model_val_auc_top3_epoch_{epoch_idx}.pth")
+                        torch.save(model.state_dict(), ckpt_path)
+                        saved_auc_epochs.add(epoch_idx)
+                        print(f"[Epoch {epoch_idx}] Saved AUC checkpoint → {ckpt_path}")
 
-                    plt.figure()
-                    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-                    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-                    plt.xlabel('False Positive Rate')
-                    plt.ylabel('True Positive Rate')
-                    plt.title('Receiver Operating Characteristic (ROC)')
-                    plt.legend(loc='lower right')
-                    save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
-                    plt.savefig(save_path)
-                    plt.close()
+            last_epoch = config['training']['max_epochs'] - 1
+            if config['training']['save_model'] and e == last_epoch:
+                final_ckpt = os.path.join(dirin, "checkpoints", f"model_final_epoch_{e}.pth")
+                torch.save(model.state_dict(), final_ckpt)
+                print(f"[Epoch {e}] Saved final epoch checkpoint → {final_ckpt}")
 
-                if config['training']['save_model']:
-                    PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
-                    torch.save(model.state_dict(), PATH)                                                  
+            # if current_loss_val < lowest_val_loss:
+            #     lowest_val_loss = current_loss_val
+            #     lowest_val_epoch = e
+
+            #     if config['training']['save_ROC_AUC']:
+
+            #         plt.figure()
+            #         plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+            #         plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+            #         plt.xlabel('False Positive Rate')
+            #         plt.ylabel('True Positive Rate')
+            #         plt.title('Receiver Operating Characteristic (ROC)')
+            #         plt.legend(loc='lower right')
+            #         save_path = os.path.join(config['model_args']['rundir'], "roc_auc_{}_epoch_{}.png".format(roc_auc, e))
+            #         plt.savefig(save_path)
+            #         plt.close()
+
+            #     if config['training']['save_model']:
+            #         PATH = os.path.join(config['model_args']['rundir'],  'model_epoch_' + str(e) + '.pth') 
+            #         torch.save(model.state_dict(), PATH)                                                  
     if is_main:
         writer.close()                                                      
         savepath = os.path.join(dirin, 'model_outputs_raw.pkl')            
@@ -414,7 +449,7 @@ def get_parser():
     parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
     parser.add_argument('--focal_loss', type=str2bool, default=False, help='whether to use focal loss instead of weighted bce')
-    parser.add_argument('--ddp', action='store_true', help='whether use ddp for')
+    parser.add_argument('--ddp', action='store_true', help='whether use ddp for training')
     return parser
 
 
@@ -455,6 +490,8 @@ def main_worker(rank, world_size, args):
 
     # Set the model directory based on the seed and time
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")   # e.g. "20250430_142532"
+    if is_main:
+        print(f"[MAIN]: Start Running on {ts}\n")
 
     # 4) keep track of other settings
     config = dict(base_cfg)
@@ -484,9 +521,9 @@ def main_worker(rank, world_size, args):
         )
         print("Model rundir:{}".format(config['model_args']['rundir']))
 
-        # Create directory if it doesn't exist
-        if not os.path.isdir(config['model_args']["rundir"]):
-            os.makedirs(os.path.join(config['model_args']["rundir"]))
+        # # Create directory if it doesn't exist
+        # if not os.path.isdir(config['model_args']["rundir"]):
+        #     os.makedirs(os.path.join(config['model_args']["rundir"]))
 
         if is_main:
             rundir = config['model_args']['rundir']
@@ -517,7 +554,7 @@ if __name__ == "__main__":
 
     print(f"\n[MAIN] <<<<<<<<<<<<<<<<<<<<<< world size: {world_size} >>>>>>>>>>>>>>>>>>>>>>>> \n")
     # if we have more than one, spawn that many processes
-    if world_size > 1:
+    if world_size > 1 and args.ddp:
         print("[MAIN] <<<<<<<<<<<<<<<<<<<<<< DDP TRAINING >>>>>>>>>>>>>>>>>>>>>>>>\n")
         torch.multiprocessing.spawn(
             main_worker,               # the function to run in each process

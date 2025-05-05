@@ -18,6 +18,9 @@ from monai.transforms import (
 from monai.data import Dataset, CacheDataset, DataLoader
 import re
 
+from torchvision.utils import save_image as tv_save_image, make_grid
+import nibabel as nib
+
 
 # Define a custom wrapper to apply intensity scaling with probability
 def probabilistic_intensity_scaling(image, probability=0.5):
@@ -569,15 +572,73 @@ class FakeFastMRIDataset(data.Dataset):
 
         image = torch.FloatTensor(transformed['image'])
         label = torch.tensor(recs['label'], dtype=torch.long)
+        
+        patient_id = recs['patient_id']
+        slice_id = recs['slice_id']
 
-        return image, label
+        return image, label, patient_id, slice_id
 
 
     def __len__(self):
         return len(self.flatten_df())
 
 
-def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, saveims, rundir, rank=0, world_size=1):
+def save_images_from_loader(loader, save_dir, split,
+                            n_images=16, saveims_format=('png',)):
+    """
+    Save up to n_images from the first batch of loader into save_dir.
+    save_formats can be:
+      - 'png'         : a single 4×4 grid image
+      - 'nifti','nii' : individual .nii.gz slices
+      - or a list/tuple containing any combination, e.g. ['png','nifti']
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    try:
+        batch = next(iter(loader))
+    except StopIteration:
+        print(f"[save_images] No data in {split} loader.")
+        return
+
+    images, labels, patient_ids, slice_ids = batch
+    images = images.detach().cpu()[:n_images]
+    if images.ndim == 4 and images.size(1) > 1:
+        images = images[:, :1, ...]  # keep only channel 0
+
+    # normalize formats arg to list
+    if isinstance(saveims_format, str):
+        formats = [saveims_format]
+    else:
+        formats = list(saveims_format)
+
+    for fmt in formats:
+        if fmt == 'png':
+            grid = make_grid(images, nrow=4, padding=2, normalize=True, scale_each=True)
+            out_path = os.path.join(save_dir, f"{split}_grid.png")
+            tv_save_image(grid, out_path)
+            print(f"[save_images] Saved PNG grid → {out_path}")
+
+        elif fmt in ('nifti','nii','nii.gz'):
+            for img, pid, sid in zip(images, patient_ids, slice_ids):
+                img_np = img.squeeze(0).numpy()
+                fname = f"{split}_pid{pid}_slice{sid}.nii.gz"
+                out_path = os.path.join(save_dir, fname)
+                nii = nib.Nifti1Image(img_np, affine=np.eye(4))
+                nib.save(nii, out_path)
+                print(f"[save_images] Saved NIfTI → {out_path}")
+
+        elif fmt == 'npz':
+            for img, pid, sid in zip(images, patient_ids, slice_ids):
+                arr = img.squeeze(0).numpy()
+                fname = f"{split}_pid{pid}_slice{sid}.npz"
+                out_path = os.path.join(save_dir, fname)
+                np.savez_compressed(out_path, image=arr)
+                print(f"[save_images] Saved NPZ → {out_path}")
+
+        else:
+            raise ValueError(f"Unsupported format '{fmt}' in saveims_format")
+
+
+def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, saveims, saveims_format, rundir, rank=0, world_size=1):
     """
     Load FastMRI prostate data and create DataLoader instances for training, validation, and testing.
 
@@ -614,4 +675,13 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
         val_loader = DataLoader(valid_dataset, batch_size=128, num_workers=0, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=128, num_workers=0, shuffle=False)
 
+    if saveims and rank == 0:
+        base_dir = os.path.join(rundir, "sample_images")
+        save_images_from_loader(train_loader, os.path.join(base_dir, "train"), "train",
+                                n_images=16, saveims_format=saveims_format)
+        save_images_from_loader(val_loader, os.path.join(base_dir, "val"), "val",
+                                n_images=16, saveims_format=saveims_format)
+        save_images_from_loader(test_loader,  os.path.join(base_dir, "test"), "test",
+                                n_images=16, saveims_format=saveims_format)
+                                
     return train_loader, val_loader, test_loader
