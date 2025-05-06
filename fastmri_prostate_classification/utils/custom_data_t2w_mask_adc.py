@@ -559,6 +559,7 @@ class FakeFastMRIDataset(data.Dataset):
             # use weighted CE
             weight = self.class_weights.to(prediction.device)
             criterion = torch.nn.CrossEntropyLoss(weight=weight)
+            # print(f"[./utils/custom_data loss] using weighted CE {weight}")
             return criterion(prediction, target)
         else:
             # standard CE
