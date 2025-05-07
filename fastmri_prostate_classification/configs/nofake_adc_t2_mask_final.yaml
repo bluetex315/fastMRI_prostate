@@ -11,7 +11,7 @@ model_args:
       warm_up: True                         # Warmup
       warmup_epochs: 5
       initial_lr: 0.00001
-      lr: 0.0001                           # typically 1e-03
+      lr: 0.00005                           # typically 1e-03
       momentum: 0.99                        # typically 1e-02
       weight_decay: 0.05                    # 1e-04
       amsgrad: True                         # True to use amsgrad https://www.fast.ai/posts/2018-07-02-adam-weight-decay.html https://openreview.net/forum?id=ryQu7f-RZ
@@ -36,4 +36,4 @@ training:
       save_model: True                     # Only save model on final set on tuned models
 
 load_model_epoch: 4
-results_fol: "../../results_t2"
+results_fol: "/home/lc2382/palmer_scratch/fastMRI/realTrain/results_t2/"

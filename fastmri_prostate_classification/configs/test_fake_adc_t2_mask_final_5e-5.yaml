@@ -35,5 +35,5 @@ training:
       max_epochs: 100                      # max_epochs to train for 
       save_model: True                     # Only save model on final set on tuned models
 
-load_model_epoch: 4
+# load_model_epoch: 4
 results_fol: "/home/lc2382/palmer_scratch/fastMRI/synTrain/results_t2/"

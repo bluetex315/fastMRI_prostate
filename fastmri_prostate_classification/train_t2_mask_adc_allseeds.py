@@ -302,13 +302,20 @@ def train_network(config, rank, world_size, is_main):
         writer = SummaryWriter(log_dir=config['model_args']['rundir'])
 
     saver = dict()    
-    lowest_val_loss = float('inf')
-    lowest_val_epoch = -1        
+    
+    best_val_loss = float('inf')      # for saving 'best.pth' according to loss
+    best_loss_epoch = -1        
+    
+    best_val_auc = -float("inf")        # for saving 'best.pth' according to auc
+    best_auc_epoch = -1
 
-    best_loss_models = []    # list of (loss, epoch)
-    best_auc_models  = []    # list of (auc, epoch)
-    saved_loss_epochs = set()
-    saved_auc_epochs  = set()
+    best_loss_models = []               # for saving top 3 best pth according to loss
+    prev_loss_epochs = set()
+    saved_loss_info = {}
+
+    best_auc_models = []                # for saving top 3 best pth according to auc
+    prev_auc_epochs = set()
+    saved_auc_info = {}
 
     for e in range(config['training']['max_epochs']):  
         if config['ddp']:
@@ -373,29 +380,80 @@ def train_network(config, rank, world_size, is_main):
             saver[e]['train_auc'] = AUC_train
             saver[e]['train_loss'] = current_loss_train
 
-            if config['training']['save_model']:
+            if config['training']['save_model_loss']:
+                # 1) update the top‑3 list
                 best_loss_models.append((current_loss_val, e))
                 best_loss_models = sorted(best_loss_models, key=lambda x: x[0])[:3]
-                for loss_val, epoch_idx in best_loss_models:
-                    if epoch_idx not in saved_loss_epochs:
-                        ckpt_path = os.path.join(loss_dir, f"model_val_loss_top3_epoch_{epoch_idx}.pth")
-                        torch.save(model.state_dict(), ckpt_path)
-                        saved_loss_epochs.add(epoch_idx)
-                        print(f"[Epoch {epoch_idx}] Saved loss checkpoint → {ckpt_path}")
+                new_best_epochs = set(epoch for _, epoch in best_loss_models)
 
-            if config['training']['save_ROC_AUC']:
-                best_auc_models.append((roc_auc, e))
+                # 2) delete any old files that dropped out of top‑3
+                to_delete = prev_loss_epochs - new_best_epochs
+                for epoch_idx in to_delete:
+                    old_loss_val = saved_loss_info.pop(epoch_idx, None)
+                    old_fname = f"model_val_loss_{old_loss_val:.4f}_epoch_{epoch_idx}.pth"
+                    old_path = os.path.join(dirin, 'checkpoints', 'best_loss_models', old_fname)
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                        print(f"[Epoch {e}] Removed old loss checkpoint → {old_path}")
+
+                # 3) save any *new* epochs that entered top‑3
+                to_save = new_best_epochs - prev_loss_epochs
+                for epoch_idx in to_save:
+                    loss_val = next(l for l,e in best_loss_models if e==epoch_idx)
+                    fname = f"model_val_loss_{loss_val:.4f}_epoch_{epoch_idx}.pth"
+                    ckpt_path = os.path.join(loss_dir, fname)
+                    torch.save(model.state_dict(), ckpt_path)
+                    saved_loss_info[epoch_idx] = loss_val
+                    print(f"[Epoch {epoch_idx}] Saved loss checkpoint → {ckpt_path}")
+
+                # 4) update your tracker
+                prev_loss_epochs = new_best_epochs.copy()
+
+                if current_loss_val < best_val_loss:
+                    best_val_loss = current_loss_val
+                    best_loss_epoch = e
+                    path = os.path.join(dirin, "checkpoints", "best_model_loss.pth")
+                    torch.save(model.state_dict(), path)
+                    print(f"[Epoch {e}] Saved overall best loss model (Loss={current_loss_val:.4f}) → {path}")
+            if config['training']['save_model_auc']:
+                # 1) update the top‑3 list (largest AUC first)
+                best_auc_models.append((AUC_val, e))
                 best_auc_models = sorted(best_auc_models, key=lambda x: x[0], reverse=True)[:3]
-                for auc_val, epoch_idx in best_auc_models:
-                    if epoch_idx not in saved_auc_epochs:
-                        # model checkpoint
-                        ckpt_path = os.path.join(auc_dir, f"model_val_auc_top3_epoch_{epoch_idx}.pth")
-                        torch.save(model.state_dict(), ckpt_path)
-                        saved_auc_epochs.add(epoch_idx)
-                        print(f"[Epoch {epoch_idx}] Saved AUC checkpoint → {ckpt_path}")
+                new_auc_epochs = set(epoch for _, epoch in best_auc_models)
 
+                # 2) delete any old files that dropped out of top‑3
+                to_delete = prev_auc_epochs - new_auc_epochs
+                for epoch_idx in to_delete:
+                    old_auc_val = saved_auc_info.pop(epoch_idx)
+                    old_fname = f"model_val_auc_{old_auc_val:.4f}_epoch_{epoch_idx}.pth"
+                    old_path = os.path.join(dirin, 'checkpoints', 'best_auc_models', old_fname)
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                        print(f"[Epoch {e}] Removed old AUC checkpoint → {old_path}")
+
+                # 3) save new epochs that entered top‑3
+                to_save = new_auc_epochs - prev_auc_epochs
+                for epoch_idx in to_save:
+                    auc_val = next(a for a, ep in best_auc_models if ep == epoch_idx)
+                    fname = f"model_val_auc_{auc_val:.4f}_epoch_{epoch_idx}.pth"
+                    ckpt_path = os.path.join(dirin, 'checkpoints', 'best_auc_models', fname)
+                    torch.save(model.state_dict(), ckpt_path)
+                    saved_auc_info[epoch_idx] = auc_val
+                    print(f"[Epoch {epoch_idx}] Saved AUC checkpoint → {ckpt_path}")
+                    
+                # 4) update tracker
+                prev_auc_epochs = new_auc_epochs.copy()
+
+                # ── overall single best by AUC ──
+                if AUC_val > best_val_auc:
+                    best_val_auc   = AUC_val
+                    best_auc_epoch = e
+                    best_path = os.path.join(dirin, "checkpoints", "best_model_auc.pth")
+                    torch.save(model.state_dict(), best_path)
+                    print(f"[Epoch {e}] Saved overall best AUC model (AUC={AUC_val:.4f}) → {best_path}")
+                    
             last_epoch = config['training']['max_epochs'] - 1
-            if config['training']['save_model'] and e == last_epoch:
+            if (config['training']['save_model_auc'] or config['training']['save_model_loss']) and e == last_epoch:
                 final_ckpt = os.path.join(dirin, "checkpoints", f"model_final_epoch_{e}.pth")
                 torch.save(model.state_dict(), final_ckpt)
                 print(f"[Epoch {e}] Saved final epoch checkpoint → {final_ckpt}")
