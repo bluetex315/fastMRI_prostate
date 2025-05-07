@@ -1,0 +1,39 @@
+model_args:
+      model: 'convnext'                     # default, this field makes no difference 
+      rundir: 't2_final_'                   # string - where the results and logs of this model get stored 
+      optimizer: 'adam'                     # either 'adam' or 'SGD' (adam will be WAdam)
+      scheduler: 'multistep'                # either 'exponentiallr', 'multistep', 'cosine', 'plat' or leave 'none'
+      gamma: 0.8                            # how much to reduce LR in scheduler 
+      ms_gamma: [0.8,0.8,0.8,0.8]           # how much to reduce LR in multi step scheduler 
+      lr_decay_steps: [10, 20, 40, 80, 120]       # what epoch nums do we want to reduce LR at [10, 20, 40] etc
+      scheduler_plat_loss: False            # True if you want to reduce LR when gains on validation plateau
+      scheduler_plat_auc: False             # True if you want to reduce LR when gains on validation plateau
+      warm_up: True                         # Warmup
+      warmup_epochs: 5
+      initial_lr: 0.00001
+      lr: 0.00005                            # typically 1e-03
+      momentum: 0.99                        # typically 1e-02
+      weight_decay: 0.05                    # 1e-04
+      amsgrad: True                         # True to use amsgrad https://www.fast.ai/posts/2018-07-02-adam-weight-decay.html https://openreview.net/forum?id=ryQu7f-RZ
+      num_classes: 5
+
+data:
+      use_synthetic_data: True
+      fake_datapath: "/home/lc2382/project/segmentation-guided-diffusion/experiments/ddim-fastMRI_NYU-128-segguided-classCond-CFG-eval_20250416_173309/samples/0399"
+      real_datapath: "/home/lc2382/project/fastMRI_NYU/nifti"
+      labelpath: "/home/lc2382/project/fastMRI_NYU/labels/pirads_t2w_npz"
+      glandmask_path: "/home/lc2382/project/fastMRI_NYU/segm_mask_v2_binarize"
+      norm_type: 2                     # 1 = percentile clip, 2 = standardisation, 3 = min-max-scaling, 4 = Gaussian norm 
+      
+training:
+      early_stop: False
+      patience: 15                          # num epochs to monitor the validation loss for overfitting before early stopping
+      augment: False                       # now deprecated May 05 2025, augment is always applied details see ./utils/custom_data_t2w_mask_adc.py
+      saveims: True                       # Recommend True to check on status of training images especially if augment
+      saveims_format: ['png', 'nifti', 'npz']
+      save_ROC_AUC: False                   
+      max_epochs: 100                      # max_epochs to train for 
+      save_model: True                     # Only save model on final set on tuned models
+
+# load_model_epoch: 4
+results_fol: "/home/lc2382/palmer_scratch/fastMRI/realTrain/results_t2/t2w/20250507_044636"

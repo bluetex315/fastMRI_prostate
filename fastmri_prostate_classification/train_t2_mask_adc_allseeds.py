@@ -446,7 +446,7 @@ def train_network(config, rank, world_size, is_main):
 
                 # ── overall single best by AUC ──
                 if AUC_val > best_val_auc:
-                    best_val_auc   = AUC_val
+                    best_val_auc = AUC_val
                     best_auc_epoch = e
                     best_path = os.path.join(dirin, "checkpoints", "best_model_auc.pth")
                     torch.save(model.state_dict(), best_path)

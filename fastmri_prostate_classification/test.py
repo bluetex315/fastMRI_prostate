@@ -1,14 +1,9 @@
-#!/usr/bin/env python3
-"""
-Test script for ConvNext prostate MRI classification.
-
-Loads a trained checkpoint, runs inference on the test set, and prints evaluation metrics.
-"""
 import argparse
 import os
 import yaml
 import torch
 import numpy as np
+import pandas as pd
 from sklearn import metrics
 
 # import your data loader and model
@@ -16,10 +11,17 @@ from utils.custom_data_t2w_mask_adc import load_data
 from model.model import ConvNext_model
 
 
+def str2bool(v):
+    if isinstance(v, bool): return v
+    if v.lower() in ('yes','true','t','y','1'): return True
+    if v.lower() in ('no','false','f','n','0'): return False
+    raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def evaluate(model, loader, device):
     """
     Run inference on `loader` and compute metrics.
-    Returns a dict of {auc, accuracy, recall, f1, conf_matrix}.
+    Returns dict with keys: auc, accuracy, recall, f1, conf_matrix.
     """
     model.eval()
     all_out, all_labels = [], []
@@ -31,82 +33,165 @@ def evaluate(model, loader, device):
             all_out.append(out.cpu())
             all_labels.append(targets.cpu())
 
-    outs = torch.cat(all_out, dim=0)
+    outs   = torch.cat(all_out, dim=0)
     labels = torch.cat(all_labels, dim=0).numpy().astype(int)
-    probs = torch.softmax(outs, dim=1).numpy()
-    preds = np.argmax(probs, axis=1)
+    probs  = torch.softmax(outs, dim=1).numpy()
+    preds  = np.argmax(probs, axis=1)
 
-    results = {}
+    res = {}
     try:
-        results['auc'] = metrics.roc_auc_score(
-            labels, probs, multi_class='ovr', average='macro'
-        )
+        res['auc'] = metrics.roc_auc_score(labels, probs, multi_class='ovr', average='macro')
     except ValueError:
-        results['auc'] = float('nan')
-    results['accuracy'] = metrics.accuracy_score(labels, preds)
-    results['recall'] = metrics.recall_score(labels, preds, average='macro')
-    results['f1'] = metrics.f1_score(labels, preds, average='macro')
-    results['conf_matrix'] = metrics.confusion_matrix(labels, preds)
-    return results
+        res['auc'] = float('nan')
+    res['accuracy'] = metrics.accuracy_score(labels, preds)
+    res['recall']   = metrics.recall_score(labels, preds, average='macro')
+    res['f1']       = metrics.f1_score(labels, preds, average='macro')
+    res['conf_matrix'] = metrics.confusion_matrix(labels, preds)
+    return res
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate a trained ConvNext model on the test set")
-    parser.add_argument('--config_file', type=str, required=True, help='YAML file with data and model settings')
-    parser.add_argument('--checkpoint', type=str, required=True, help='Path to the .pth checkpoint file')
-    parser.add_argument('--concat_mask', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate gland mask as an additional channel.')
-    parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
-    parser.add_argument('--index_seed', type=int, help='Seed number for reproducibility for all numpy, random, torch, if not provided, loop through all seeds')
-    parser.add_argument('--saveims', action='store_true', help='If set, will dump sample images from test loader')
-    parser.add_argument('--saveims_format', nargs='+', default=['png'], help='List of formats to save images: png, nifti, npz')
+    parser = argparse.ArgumentParser(
+        description="Batch evaluation of best_model_auc across multiple seeds"
+    )
+    parser.add_argument('--config_file', type=str, required=True,
+                        help='YAML file with data and model settings (including results_fol)')
+    parser.add_argument('--index_seed', type=int,
+                        help='If set, only evaluate this seed index (0-based)')
+    parser.add_argument('--concat_mask', type=str2bool, required=True,
+                        help='Whether to concatenate gland mask as extra channel')
+    parser.add_argument('--concat_adc', type=str2bool, required=True,
+                        help='Whether to concatenate ADC as extra channel')
+    parser.add_argument('--focal_loss', type=str2bool, default=False,
+                        help='Whether to use focal loss instead of BCE')
+    parser.add_argument('--ddp', action='store_true',
+                        help='Whether training used DDP (affects loading)')
+    parser.add_argument('--saveims', action='store_true',
+                        help='If set, will dump sample images from test loader')
+    parser.add_argument('--saveims_format', nargs='+', default=['png'],
+                        help='Formats to save images: png, nifti, npz')
     args = parser.parse_args()
 
     # load config
     with open(args.config_file) as f:
         config = yaml.load(f, Loader=yaml.SafeLoader)
 
-    # disable DDP for testing
-    config['ddp'] = False
+    # apply flags
+    config['ddp'] = args.ddp
+    config['concat_mask'] = args.concat_mask
+    config['concat_adc'] = args.concat_adc
+    config['focal_loss'] = args.focal_loss
     config['training']['saveims'] = args.saveims
     config['training']['saveims_format'] = args.saveims_format
 
-    # device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    
+    # collect seed folders
+    results_root = config['results_fol']
+    seeds = sorted(d for d in os.listdir(results_root) if d.startswith('SEED'))
+    seeds_nums = [int(s.split('_',1)[1]) for s in seeds]
 
-    # load data
-    train_loader, val_loader, test_loader = load_data(
-        config=config,
-        datapath=config['data']['fake_datapath'],
-        labelpath=config['data']['labelpath'],
-        gland_maskpath=config['data']['glandmask_path'],
-        norm_type=int(config['data']['norm_type']),
-        augment=False,
-        saveims=config['training']['saveims'],
-        saveims_format=config['training']['saveims_format'],
-        rundir=config['model_args']['rundir'],
-        rank=0,
-        world_size=1
-    )
+    if not seeds:
+        raise RuntimeError(f"No SEED_xxx folders in {results_root}")
+    if args.index_seed is not None:
+        seeds = [seeds[args.index_seed]]
 
-    # build model and load weights
-    model = ConvNext_model(config)
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(checkpoint)
-    model.to(device)
+    all_aucs = []
+    all_recalls = []
+    all_accs = []
+    summary = []
 
-    # evaluate on test set
-    print("Running evaluation on test set...")
-    results = evaluate(model, test_loader, device)
+    for seed in seeds_nums:
 
-    # print results
-    print("Test Results:")
-    print(f"AUC      : {results['auc']:.4f}")
-    print(f"Accuracy : {results['accuracy']:.4f}")
-    print(f"Recall   : {results['recall']:.4f}")
-    print(f"F1 Score : {results['f1']:.4f}")
-    print("Confusion Matrix:")
-    print(results['conf_matrix'])
+        seed_dir = os.path.join(results_root, "SEED_"+str(seed))
+        print(seed_dir)
+        print(f"\n=== Seed {seed} ===")
+
+        # set rundir for saveims
+        config['seed'] = seed
+        config['model_args']['rundir'] = seed_dir
+
+        # load test data
+        _, _, test_loader = load_data(
+            config=config,
+            datapath=config['data']['fake_datapath'],
+            labelpath=config['data']['labelpath'],
+            gland_maskpath=config['data']['glandmask_path'],
+            norm_type=int(config['data']['norm_type']),
+            augment=False,
+            saveims=config['training']['saveims'],
+            saveims_format=config['training']['saveims_format'],
+            rundir=seed_dir,
+            rank=0,
+            world_size=1
+        )
+
+        # build and load model
+        model = ConvNext_model(config)
+        ckpt = os.path.join(seed_dir, 'checkpoints', 'best_model_auc.pth')
+        if not os.path.exists(ckpt):
+            print(f"  MISSING: {ckpt}")
+            continue
+        state = torch.load(ckpt, map_location=device)
+        model.load_state_dict(state)
+        model.to(device)
+
+        # evaluate
+        res = evaluate(model, test_loader, device)
+        print()
+        print("*"*25+"Evaluating"+"*"*25)
+        print(f"  AUC      : {res['auc']:.4f}")
+        print(f"  Accuracy : {res['accuracy']:.4f}")
+        print(f"  Recall   : {res['recall']:.4f}")
+        print(f"  F1 Score : {res['f1']:.4f}")
+        print(f"  Confusion Matrix:\n{res['conf_matrix']}")
+        print("*"*25+"finish"+"*"*25)
+        print()
+
+        all_aucs.append(res['auc'])
+        all_recalls.append(res['recall'])
+        all_accs.append(res['accuracy'])
+
+        summary.append({
+            'Seed': seed,
+            'AUC': res['auc'],
+            'ACC': res['accuracy'],
+            'recall': res['recall']
+        })
+    
+    if all_aucs:
+        print(f"\nOverall AUC: {np.mean(all_aucs):.4f} ± {np.std(all_aucs):.4f}")
+    if all_accs:
+        print(f"Overall Accuracy: {np.mean(all_accs):.4f} ± {np.std(all_accs):.4f}")
+    if all_recalls:
+        print(f"Overall Recall: {np.mean(all_recalls):.4f} ± {np.std(all_recalls):.4f}")
+
+    # write CSV for real metrics only using pandas
+    df = pd.DataFrame(summary)
+    df = df.round({'AUC': 4, 'recall': 4, 'ACC': 4})
+    
+    mean_auc = df['AUC'].mean()
+    std_auc = df['AUC'].std()
+    mean_recall = df['recall'].mean()
+    std_recall = df['recall'].std()
+    mean_acc = df['ACC'].mean()
+    std_acc = df['ACC'].std()
+    
+    summary_row = {
+        'Seed': 'Mean±Std',
+        'AUC': f"{mean_auc:.4f}±{std_auc:.4f}",
+        'recall': f"{mean_recall:.4f}±{std_recall:.4f}",
+        'ACC': f"{mean_acc:.4f}±{std_acc:.4f}"
+    }
+    summary_df = pd.DataFrame([summary_row])
+    df = pd.concat([df, summary_df], ignore_index=True)
+
+    date_tag = os.path.basename(results_root.rstrip(os.sep))
+    csv_filename = f"{date_tag}_evaluation_summary.csv"
+    csv_path = os.path.join(results_root, csv_filename)
+    df.to_csv(csv_path, index=False)
+    print(f"Wrote summary CSV → {csv_path}")
 
 
 if __name__ == '__main__':
