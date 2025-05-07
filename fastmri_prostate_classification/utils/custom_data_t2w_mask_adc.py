@@ -662,6 +662,7 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
     
     if world_size > 1:
         # DDP case
+        # TODO: Distributed dataloader
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
         val_sampler = DistributedSampler(valid_dataset, num_replicas=world_size, rank=rank, shuffle=False)
         test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False)

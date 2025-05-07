@@ -43,9 +43,10 @@ def evaluate(model, loader, device):
         res['auc'] = metrics.roc_auc_score(labels, probs, multi_class='ovr', average='macro')
     except ValueError:
         res['auc'] = float('nan')
-    res['accuracy'] = metrics.accuracy_score(labels, preds)
-    res['recall']   = metrics.recall_score(labels, preds, average='macro')
-    res['f1']       = metrics.f1_score(labels, preds, average='macro')
+    res['accuracy']  = metrics.accuracy_score(labels, preds)
+    res['recall']    = metrics.recall_score(labels, preds, average='macro')
+    res['precision'] = metrics.precision_score(labels, preds, average='macro')
+    res['f1']        = metrics.f1_score(labels, preds, average='macro')
     res['conf_matrix'] = metrics.confusion_matrix(labels, preds)
     return res
 
@@ -98,8 +99,11 @@ def main():
         seeds = [seeds[args.index_seed]]
 
     all_aucs = []
-    all_recalls = []
     all_accs = []
+    all_recalls = []
+    all_precisions = []
+    all_f1s = []
+
     summary = []
 
     for seed in seeds_nums:
@@ -144,20 +148,25 @@ def main():
         print(f"  AUC      : {res['auc']:.4f}")
         print(f"  Accuracy : {res['accuracy']:.4f}")
         print(f"  Recall   : {res['recall']:.4f}")
+        print(f"  Precision: {res['precision']:.4f}")
         print(f"  F1 Score : {res['f1']:.4f}")
         print(f"  Confusion Matrix:\n{res['conf_matrix']}")
         print("*"*25+"finish"+"*"*25)
         print()
 
         all_aucs.append(res['auc'])
-        all_recalls.append(res['recall'])
         all_accs.append(res['accuracy'])
+        all_recalls.append(res['recall'])
+        all_precisions.append(res['precision'])
+        all_f1s.append(res['f1'])
 
         summary.append({
             'Seed': seed,
             'AUC': res['auc'],
             'ACC': res['accuracy'],
-            'recall': res['recall']
+            'recall': res['recall'],
+            'precision': res['precision'],
+            'f1': res['f1']
         })
     
     if all_aucs:
@@ -166,24 +175,35 @@ def main():
         print(f"Overall Accuracy: {np.mean(all_accs):.4f} ± {np.std(all_accs):.4f}")
     if all_recalls:
         print(f"Overall Recall: {np.mean(all_recalls):.4f} ± {np.std(all_recalls):.4f}")
+    if all_precisions:
+        print(f"Overall Precision: {np.mean(all_precisions):.4f} ± {np.std(all_precisions):.4f}")
+    if all_f1s:
+        print(f"Overall F1: {np.mean(all_f1s):.4f} ± {np.std(all_f1s):.4f}")
 
     # write CSV for real metrics only using pandas
     df = pd.DataFrame(summary)
-    df = df.round({'AUC': 4, 'recall': 4, 'ACC': 4})
+    df = df.round({'AUC': 4, 'ACC': 4, 'recall': 4, 'precision': 4, 'f1': 4})
     
     mean_auc = df['AUC'].mean()
     std_auc = df['AUC'].std()
-    mean_recall = df['recall'].mean()
-    std_recall = df['recall'].std()
     mean_acc = df['ACC'].mean()
     std_acc = df['ACC'].std()
+    mean_recall = df['recall'].mean()
+    std_recall = df['recall'].std()
+    mean_precision = df['precision'].mean()
+    std_precision = df['precision'].std()
+    mean_f1 = df['f1'].mean()
+    std_f1 = df['f1'].std()
     
     summary_row = {
         'Seed': 'Mean±Std',
         'AUC': f"{mean_auc:.4f}±{std_auc:.4f}",
+        'ACC': f"{mean_acc:.4f}±{std_acc:.4f}",
         'recall': f"{mean_recall:.4f}±{std_recall:.4f}",
-        'ACC': f"{mean_acc:.4f}±{std_acc:.4f}"
+        'precision': f"{mean_precision:.4f}±{std_precision:.4f}",
+        'f1': f"{mean_f1:.4f}±{std_f1:.4f}"
     }
+    
     summary_df = pd.DataFrame([summary_row])
     df = pd.concat([df, summary_df], ignore_index=True)
 
