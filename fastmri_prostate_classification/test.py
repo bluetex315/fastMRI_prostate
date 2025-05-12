@@ -7,7 +7,7 @@ import pandas as pd
 from sklearn import metrics
 
 # import your data loader and model
-from utils.custom_data_t2w_mask_adc import load_data
+from utils.custom_data_t2w_mask_adc_new import load_data
 from model.model import ConvNext_model
 
 
@@ -26,7 +26,13 @@ def evaluate(model, loader, device):
     model.eval()
     all_out, all_labels = [], []
     with torch.no_grad():
-        for images, targets, _, _ in loader:
+        for batch in loader:
+
+            images = batch['image']
+            targets = batch['class_label']
+            patient_ids = batch['patient_id']
+            slice_ids = batch['slice_idx']
+            
             images = images.to(device)
             targets = targets.flatten().to(device)
             out = model(images)
@@ -56,7 +62,9 @@ def main():
         description="Batch evaluation of best_model_auc across multiple seeds"
     )
     parser.add_argument('--config_file', type=str, required=True,
-                        help='YAML file with data and model settings (including results_fol)')
+                        help='Config YAML file that is used exactly for training with data and model settings')
+    parser.add_argument('--results_fol', type=str, required=True,
+                        help='Results folder that contains the checkpoints, should be the time format YYYYMMDD_HHMMSS')                  
     parser.add_argument('--index_seed', type=int,
                         help='If set, only evaluate this seed index (0-based)')
     parser.add_argument('--concat_mask', type=str2bool, required=True,
@@ -71,6 +79,7 @@ def main():
                         help='If set, will dump sample images from test loader')
     parser.add_argument('--saveims_format', nargs='+', default=['png'],
                         help='Formats to save images: png, nifti, npz')
+    parser.add_argument('--split', type=str, default='eval')
     args = parser.parse_args()
 
     # load config
@@ -84,6 +93,8 @@ def main():
     config['focal_loss'] = args.focal_loss
     config['training']['saveims'] = args.saveims
     config['training']['saveims_format'] = args.saveims_format
+    config['results_fol'] = args.results_fol
+    config['split'] = args.split
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -116,21 +127,21 @@ def main():
         config['seed'] = seed
         config['model_args']['rundir'] = seed_dir
 
-        # load test data
         _, _, test_loader = load_data(
             config=config,
-            datapath=config['data']['fake_datapath'],
-            labelpath=config['data']['labelpath'],
-            gland_maskpath=config['data']['glandmask_path'],
-            norm_type=int(config['data']['norm_type']),
-            augment=False,
-            saveims=config['training']['saveims'],
+            datapath=config['data']['syn_datapath'], 
+            labelpath=config["data"]["label_csv_dir"],
+            gland_maskpath=config["data"]["glandmask_path"], 
+            norm_type=int(config['data']['norm_type']),  
+            augment=config['training']['augment'], 
+            saveims=config['training']['saveims'], 
             saveims_format=config['training']['saveims_format'],
-            rundir=seed_dir,
-            rank=0,
-            world_size=1
+            rundir=config['model_args']['rundir'],
+            split=config['split']
         )
 
+        print('Lengths of Test DataLoader for seed {}: Test:{}'.format(seed, len(test_loader)))  
+    
         # build and load model
         model = ConvNext_model(config)
         ckpt = os.path.join(seed_dir, 'checkpoints', 'best_model_auc.pth')

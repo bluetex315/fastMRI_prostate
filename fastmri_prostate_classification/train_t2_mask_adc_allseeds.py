@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.distributed as dist
 from sklearn import metrics
 # from utils.load_fastmri_data_convnext_t2 import load_data
-from utils.custom_data_t2w_mask_adc import load_data
+from utils.custom_data_t2w_mask_adc_new import load_data
 from model.model import ConvNext_model
 from utils.pytorchtools import EarlyStopping
 from model.extra_model_utils import get_optim_sched, get_lr
@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 
-def train(model, optimizer, scheduler, train_loader, device):
+def train(model, optimizer, scheduler, train_loader, criterion, device):
     """
     Train the ConvNext model for one epoch.
 
@@ -41,7 +41,13 @@ def train(model, optimizer, scheduler, train_loader, device):
 
     total_loss_train, total_num, all_out, all_labels = 0.0, 0, [], []  
 
-    for images, targets, patient_ids, slice_ids in tqdm(train_loader, desc="Training", disable=(dist.is_initialized() and dist.get_rank()!=0)):
+    for batch in tqdm(train_loader, desc="Training", disable=(dist.is_initialized() and dist.get_rank()!=0)):
+
+        images = batch['image']
+        targets = batch['class_label']
+        patient_ids = batch['patient_id']
+        slice_ids = batch['slice_idx']
+        
         images = images.to(device)
         targets = torch.flatten(targets.to(device))
 
@@ -49,7 +55,7 @@ def train(model, optimizer, scheduler, train_loader, device):
         out = model(images)                                         
         # out = torch.flatten(out)     
 
-        loss = train_loader.dataset.loss(out, targets) 
+        loss = criterion(out, targets) 
           
         loss.backward()                                                
         optimizer.step()                                               
@@ -134,7 +140,7 @@ def train(model, optimizer, scheduler, train_loader, device):
     else:
         return (None,)*9
 
-def val(model, val_loader, device):
+def val(model, val_loader, criterion, device):
     """
     Validate the ConvNext model on the validation set.
 
@@ -155,15 +161,20 @@ def val(model, val_loader, device):
 
     total_loss_val, total_num_val, all_out, all_labels_val = 0.0, 0, [], []  
  
-    val_loader_tqdm = tqdm(val_loader, desc="Validating", unit="batch")  
+    # val_loader_tqdm = tqdm(val_loader, desc="Validating", unit="batch")  
         
     with torch.no_grad():                                                    
-        for images, targets, patient_ids, slice_ids in tqdm(val_loader, desc="Validating", disable=(dist.is_initialized() and dist.get_rank() != 0)):
+        for batch in tqdm(val_loader, desc="Validating", disable=(dist.is_initialized() and dist.get_rank() != 0)):
+            images = batch['image']
+            targets = batch['class_label']
+            patient_ids = batch['patient_id']
+            slice_ids = batch['slice_idx']
+
             images = images.to(device)
             targets = torch.flatten(targets.to(device)) 
 
             out = model(images)                                                
-            criterion = nn.CrossEntropyLoss()
+            # criterion = nn.CrossEntropyLoss()
             loss = criterion(out, targets)                                            
 
             total_loss_val += loss.item()              
@@ -262,23 +273,39 @@ def train_network(config, rank, world_size, is_main):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if is_main:
         print(f"[Rank {rank}] Using device {device}")
-    
+
     train_loader, valid_loader, test_loader = load_data(
         config=config,
-        datapath=config['data']['fake_datapath'], 
-        labelpath=config["data"]["labelpath"],
+        datapath=config['data']['syn_datapath'], 
+        labelpath=config["data"]["label_csv_dir"],
         gland_maskpath=config["data"]["glandmask_path"], 
         norm_type=int(config['data']['norm_type']),  
         augment=config['training']['augment'], 
         saveims=config['training']['saveims'], 
         saveims_format=config['training']['saveims_format'],
         rundir=config['model_args']['rundir'],
+        split=config['split'],
         rank=rank,
         world_size=world_size
     )
 
-    print('Lengths of DataLoader: Train:{}, Val:{}, Test:{}'.format(len(train_loader), len(valid_loader), len(test_loader)))  
+    if config['split'] == 'train':
+        print('Lengths of DataLoader: Train:{}, Val:{},'.format(len(train_loader), len(valid_loader)))
+    elif config['split'] == 'eval':
+        print('Lengths of DataLoader: Test:{},'.format(len(test_loader)))
     
+    if not config['data']['use_synthetic_data']:
+        # pull out all the real‐train labels
+        labels = [sample['class_label'] for sample in train_loader.dataset]
+        counts = np.bincount(labels, minlength=5)
+        inv_freq = 1.0 / (counts + 1e-6)
+        weights = inv_freq / inv_freq.sum() * len(counts)
+        weight_tensor = torch.tensor(weights, dtype=torch.float32, device=device)
+        criterion = nn.CrossEntropyLoss(weight=weight_tensor)
+    else:
+        # synthetic is balanced, no weighting
+        criterion = nn.CrossEntropyLoss()
+        
     model = ConvNext_model(config).to(device)
 
     if config['ddp']:
@@ -323,8 +350,8 @@ def train_network(config, rank, world_size, is_main):
             valid_loader.sampler.set_epoch(e)
             
         model.train()                                 
-        AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, device)       
-        AUC_val, current_loss_val, acc_val, recall_val, f1_val, conf_matrix_val, labels_validation, raw_preds_validation = val(model, valid_loader, device)     
+        AUC_train, current_LR, current_loss_train, acc_train, recall_train, f1_train, conf_matrix_train, labels_train, raw_preds_train = train(model, optimizer, scheduler, train_loader, criterion, device)       
+        AUC_val, current_loss_val, acc_val, recall_val, f1_val, conf_matrix_val, labels_validation, raw_preds_validation = val(model, valid_loader, criterion, device)     
 
         if is_main and current_loss_val is not None:
             if config['training']['early_stop']:
@@ -508,6 +535,7 @@ def get_parser():
     parser.add_argument('--concat_adc', type=str2bool, required=True, help='Set to True or False to specify whether to concatenate ADC as an additional channel.')
     parser.add_argument('--focal_loss', type=str2bool, default=False, help='whether to use focal loss instead of weighted bce')
     parser.add_argument('--ddp', action='store_true', help='whether use ddp for training')
+    parser.add_argument('--split', type=str, default='train')
     return parser
 
 
@@ -557,6 +585,7 @@ def main_worker(rank, world_size, args):
     config['concat_adc'] = args.concat_adc
     config['focal_loss'] = args.focal_loss
     config['ddp'] = args.ddp
+    config['split'] = args.split
 
     # 5) Loop through all seeds
     for seed_select in seed_list:

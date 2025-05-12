@@ -19,10 +19,11 @@ model_args:
 
 data:
       use_synthetic_data: False
-      fake_datapath: "/home/lc2382/project/segmentation-guided-diffusion/experiments/ddim-fastMRI_NYU-128-segguided-classCond-CFG-eval_20250416_173309/samples/0399"
+      syn_datapath: "/home/lc2382/project/segmentation-guided-diffusion/experiments/ddim-fastMRI_NYU-128-segguided-classCond-CFG-eval_20250416_173309/samples/0399"
       real_datapath: "/home/lc2382/project/fastMRI_NYU/nifti"
-      labelpath: "/home/lc2382/project/fastMRI_NYU/labels/pirads_t2w_npz"
+      label_csv_dir: "/home/lc2382/project/segmentation-guided-diffusion/data/labels/t2_slice_level_labels_reversed.csv"
       glandmask_path: "/home/lc2382/project/fastMRI_NYU/segm_mask_v2_binarize"
+      atlas_CGPZ_path: "/home/lc2382/project/segmentation-guided-diffusion/data/CG+PZ_seg"
       norm_type: 2                     # 1 = percentile clip, 2 = standardisation, 3 = min-max-scaling, 4 = Gaussian norm 
       
 training:
@@ -35,6 +36,3 @@ training:
       max_epochs: 100                      # max_epochs to train for 
       save_model_loss: True                     # Only save model on final set on tuned models
       save_model_auc: True
-      
-load_model_epoch: 4
-results_fol: "/home/lc2382/palmer_scratch/fastMRI/realTrain/results_t2/"
