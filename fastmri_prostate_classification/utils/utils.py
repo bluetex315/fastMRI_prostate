@@ -37,7 +37,7 @@ def parse_syn_slices(
     """
     Build a list of dicts, each containing:
       - "image":   full path to the .nii.gz
-      - "label":   int class 0–4
+      - "label":   int class 0-4
       - "patient_id": str patient identifier (e.g. "001")
       - "slice_idx":  int slice number (parsed from "_slice{n}_")
     
@@ -171,23 +171,24 @@ def parse_3d_volumes(dset_dict, seg_type, label_csv_file=None):
                 'patient_id': patient_id,
                 'slice_idx': z,
                 'image': img_vol[:, :, z],
-                seg_key: seg_vol[:, :, z]
+                # seg_key: seg_vol[:, :, z]
             }
 
-            # Get the left (previous) slice or pad if at boundary.
-            if z - 1 >= 0:
-                clean_left = img_vol[:, :, z - 1]
-            else:
-                clean_left = np.zeros(img_vol[:, :, z].shape, dtype=img_vol.dtype)
+            # @deprecated as no need for clean_left, clean_right, and seg_key
+            # # Get the left (previous) slice or pad if at boundary.
+            # if z - 1 >= 0:
+            #     clean_left = img_vol[:, :, z - 1]
+            # else:
+            #     clean_left = np.zeros(img_vol[:, :, z].shape, dtype=img_vol.dtype)
 
-            # Get the right (next) slice or pad if at boundary.
-            if z + 1 < num_slices:
-                clean_right = img_vol[:, :, z + 1]
-            else:
-                clean_right = np.zeros(img_vol[:, :, z].shape, dtype=img_vol.dtype)
+            # # Get the right (next) slice or pad if at boundary.
+            # if z + 1 < num_slices:
+            #     clean_right = img_vol[:, :, z + 1]
+            # else:
+            #     clean_right = np.zeros(img_vol[:, :, z].shape, dtype=img_vol.dtype)
 
-            slice_info['clean_left'] = clean_left
-            slice_info['clean_right'] = clean_right
+            # slice_info['clean_left'] = clean_left
+            # slice_info['clean_right'] = clean_right
             
             # Add the slice-level class label if available.
             key = (patient_id, z)

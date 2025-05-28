@@ -19,6 +19,7 @@ model_args:
 
 data:
       use_synthetic_data: True
+      combine_real_data: False
       syn_datapath: "/home/lc2382/project/segmentation-guided-diffusion/experiments/ddim-fastMRI_NYU-128-segguided-classCond-CFG-eval_20250416_173309/samples/0399"
       real_datapath: "/home/lc2382/project/fastMRI_NYU/nifti"
       label_csv_dir: "/home/lc2382/project/segmentation-guided-diffusion/data/labels/t2_slice_level_labels_reversed.csv"
