@@ -92,7 +92,7 @@ def parse_syn_slices(
 
     return slices
 
-    
+
 def parse_3d_volumes(dset_dict, seg_type, label_csv_file=None):
 
     if label_csv_file is not None:
@@ -159,7 +159,7 @@ def parse_3d_volumes(dset_dict, seg_type, label_csv_file=None):
         # Determine the selection range.
         # For example, if the active segmentation is between slice 8 and 22, then include from
         # max(0, 8-neighbor_range) to min(num_slices-1, 22+neighbor_range)
-        neighbor_range = 3
+        neighbor_range = 0
         min_valid = min(valid_indices)
         max_valid = max(valid_indices)
         start_idx = max(0, min_valid - neighbor_range)
@@ -195,8 +195,8 @@ def parse_3d_volumes(dset_dict, seg_type, label_csv_file=None):
             if key in labels_dict:
                 slice_info['class_label'] = labels_dict[key]
             else:
-                print("None", key)
-                slice_info['class_label'] = None  # or you might choose to skip the slice if no label exists.
+                raise AssertionError (f"the key {key} does not have a corresponding label, problematic") 
+                # slice_info['class_label'] = None  # or you might choose to skip the slice if no label exists.
 
             selected_slices.append(slice_info)
     

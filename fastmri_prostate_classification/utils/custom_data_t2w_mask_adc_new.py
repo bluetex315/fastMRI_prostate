@@ -395,6 +395,7 @@ def save_images_from_loader(loader, save_dir, split,
     slice_ids = batch['slice_idx']
 
     images = images.detach().cpu()[:n_images]
+    print("line 398", images.shape)
     if images.ndim == 4 and images.size(1) > 1:
         images = images[:, :1, ...]  # keep only channel 0
 
@@ -533,7 +534,7 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
 
     # training transform for the downstream classification
     cls_train_transforms = Compose([
-        EnsureChannelFirstd(keys=tot_keys, channel_dim='no_channel'),
+        # EnsureChannelFirstd(keys=tot_keys, channel_dim='no_channel'),
         RandAffined(
             keys=tot_keys,
             prob=0.5,
@@ -575,6 +576,8 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
             
             # if using synthetic, then not having diffusion transform, loading from diffusion saved data
             train_transforms = Compose([
+                # Add a channel dimension to 'image' and 'segm'
+                EnsureChannelFirstd(keys=tot_keys, channel_dim='no_channel'),
                 *cls_train_transforms.transforms,           # cls_train_transform (augmentation for cls) + ToTensor
             ])
         else:

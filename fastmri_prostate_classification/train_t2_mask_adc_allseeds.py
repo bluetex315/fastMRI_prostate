@@ -296,6 +296,7 @@ def train_network(config, rank, world_size, is_main):
     
     if not config['data']['use_synthetic_data']:
         # pull out all the real‐train labels
+        print("\n[main] Using weighted CE as default \n")
         labels = [sample['class_label'] for sample in train_loader.dataset]
         counts = np.bincount(labels, minlength=5)
         inv_freq = 1.0 / (counts + 1e-6)
