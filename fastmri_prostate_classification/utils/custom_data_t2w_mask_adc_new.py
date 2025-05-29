@@ -270,12 +270,10 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
     if split == "train":
         if config['data']['use_synthetic_data']:
             syn_slices_dset_list_train = parse_syn_slices(train_ids, config['data']['syn_datapath'], split='train')
-            print("line 272", type(syn_slices_dset_list_train), syn_slices_dset_list_train[0])
             syn_train_dataset = monai.data.Dataset(syn_slices_dset_list_train, transform=syn_slices_train_transforms)
 
             if config['data']['combine_real_data']:
                 real_slices_dset_list_train = parse_3d_volumes(dset_dict_train, seg_type, label_csv_file=config['data']['label_csv_dir'])
-                print("line 277", type(real_slices_dset_list_train), real_slices_dset_list_train[0])
                 real_train_dataset = monai.data.Dataset(real_slices_dset_list_train, transform=real_slices_train_transforms)
                 
                 train_dataset = ConcatDataset([syn_train_dataset, real_train_dataset])
@@ -285,8 +283,10 @@ def load_data(config, datapath, labelpath, gland_maskpath, norm_type, augment, s
             
         else:       # using only real data extracted from 3D volume
             real_slices_dset_list_train = parse_3d_volumes(dset_dict_train, seg_type, label_csv_file=config['data']['label_csv_dir'])
+            real_train_dataset = monai.data.Dataset(real_slices_dset_list_train, transform=real_slices_train_transforms)
+            
             train_dataset = real_train_dataset
-
+        
         # validation set will be all real images regardless
         slices_dset_list_val = parse_3d_volumes(dset_dict_val, seg_type, label_csv_file=config['data']['label_csv_dir'])
         val_dataset = monai.data.Dataset(slices_dset_list_val, transform=eval_transforms)

@@ -20,7 +20,7 @@ model_args:
 data:
       use_synthetic_data: False
       combine_real_data: False
-      fake_datapath: "/home/lc2382/project/segmentation-guided-diffusion/experiments/ddim-fastMRI_NYU-128-segguided-classCond-CFG-eval_20250416_173309/samples/0399"
+      syn_datapath: "/home/lc2382/project/segmentation-guided-diffusion/experiments/ddim-fastMRI_NYU-128-segguided-classCond-CFG-eval_20250416_173309/samples/0399"
       real_datapath: "/home/lc2382/project/fastMRI_NYU/nifti"
       labelpath: "/home/lc2382/project/fastMRI_NYU/labels/pirads_t2w_npz"
       glandmask_path: "/home/lc2382/project/fastMRI_NYU/segm_mask_v2_binarize"
